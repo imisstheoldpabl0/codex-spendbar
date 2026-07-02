@@ -65,6 +65,7 @@ struct ThreadMeta {
     let effort: String
     let title: String
     let cwd: String
+    let lastActivityMS: Int64
 }
 
 struct UsageAggregate {
@@ -102,6 +103,15 @@ struct ThreadSummary {
     let title: String
     let cwd: String
     let threadID: String
+    let aggregate: UsageAggregate
+    let breakdowns: [ThreadBreakdownSummary]
+    let lastActivityMS: Int64
+}
+
+struct ThreadBreakdownSummary {
+    let model: String
+    let effort: String
+    let speed: String
     let aggregate: UsageAggregate
 }
 
@@ -687,6 +697,7 @@ final class CodexUsageStore {
         var monthlyByStart: [Date: UsageAggregate] = [:]
         var modelAggregates: [String: UsageAggregate] = [:]
         var threadAggregates: [String: UsageAggregate] = [:]
+        var threadBreakdownAggregates: [String: [ThreadBreakdownKey: UsageAggregate]] = [:]
         var threadTitles: [String: String] = [:]
         var threadCWDs: [String: String] = [:]
         var projectAggregates: [String: UsageAggregate] = [:]
@@ -720,6 +731,12 @@ final class CodexUsageStore {
             threadAggregates[request.threadID, default: UsageAggregate()].add(request)
             threadTitles[request.threadID] = request.title
             threadCWDs[request.threadID] = request.cwd
+            let breakdownKey = ThreadBreakdownKey(
+                model: request.model.isEmpty ? "unknown model" : request.model,
+                effort: request.effort.isEmpty ? "unknown effort" : request.effort,
+                speed: PricingTable.normalizedSpeed(request.speed)
+            )
+            threadBreakdownAggregates[request.threadID, default: [:]][breakdownKey, default: UsageAggregate()].add(request)
 
             let project = projectName(from: request.cwd)
             projectAggregates[project, default: UsageAggregate()].add(request)
@@ -748,21 +765,48 @@ final class CodexUsageStore {
                 return $0.aggregate.cost.total > $1.aggregate.cost.total
             }
 
+        let threadLastSeenMS = requests.reduce(into: [String: Int64]()) { result, request in
+            let timestampMS = Int64(request.timestamp.timeIntervalSince1970 * 1000)
+            result[request.threadID] = max(result[request.threadID] ?? 0, timestampMS)
+        }
+
         let byThread = threadAggregates
             .map {
-                ThreadSummary(
-                    title: threadTitles[$0.key] ?? $0.key,
-                    cwd: threadCWDs[$0.key] ?? "",
-                    threadID: $0.key,
-                    aggregate: $0.value
+                let threadID = $0.key
+                let metaLastSeenMS = threadMeta[threadID]?.lastActivityMS ?? 0
+                let lastActivityMS = max(metaLastSeenMS, threadLastSeenMS[threadID] ?? 0)
+                return ThreadSummary(
+                    title: threadMeta[threadID]?.title ?? threadTitles[threadID] ?? threadID,
+                    cwd: threadCWDs[threadID] ?? "",
+                    threadID: threadID,
+                    aggregate: $0.value,
+                    breakdowns: (threadBreakdownAggregates[threadID] ?? [:])
+                        .map {
+                            ThreadBreakdownSummary(
+                                model: $0.key.model,
+                                effort: $0.key.effort,
+                                speed: $0.key.speed,
+                                aggregate: $0.value
+                            )
+                        }
+                        .sorted {
+                            if $0.aggregate.cost.total == $1.aggregate.cost.total {
+                                return $0.aggregate.usage.totalTokens > $1.aggregate.usage.totalTokens
+                            }
+                            return $0.aggregate.cost.total > $1.aggregate.cost.total
+                        },
+                    lastActivityMS: lastActivityMS
                 )
             }
-            .sorted {
-                if $0.aggregate.cost.total == $1.aggregate.cost.total {
-                    return $0.aggregate.usage.totalTokens > $1.aggregate.usage.totalTokens
+            .sorted(by: { lhs, rhs in
+                if lhs.lastActivityMS == rhs.lastActivityMS {
+                    if lhs.aggregate.cost.total == rhs.aggregate.cost.total {
+                        return lhs.aggregate.usage.totalTokens > rhs.aggregate.usage.totalTokens
+                    }
+                    return lhs.aggregate.cost.total > rhs.aggregate.cost.total
                 }
-                return $0.aggregate.cost.total > $1.aggregate.cost.total
-            }
+                return lhs.lastActivityMS > rhs.lastActivityMS
+            })
 
         let byProject = projectAggregates
             .map {
@@ -794,6 +838,12 @@ final class CodexUsageStore {
             parseErrorCount: parseErrorCount,
             filesScanned: files.count
         )
+    }
+
+    private struct ThreadBreakdownKey: Hashable {
+        let model: String
+        let effort: String
+        let speed: String
     }
 
     private func projectName(from cwd: String) -> String {
@@ -1345,7 +1395,11 @@ final class CodexUsageStore {
         let model: String?
         let reasoning_effort: String?
         let title: String?
+        let first_user_message: String?
+        let preview: String?
         let cwd: String?
+        let updated_at_ms: Int64?
+        let recency_at_ms: Int64?
     }
 
     private func loadThreadMetadata() -> [String: ThreadMeta] {
@@ -1355,7 +1409,12 @@ final class CodexUsageStore {
         }
 
         let process = Process()
-        let output = Pipe()
+        let outputURL = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("codex-spendbar-threads-\(UUID().uuidString).json")
+        FileManager.default.createFile(atPath: outputURL.path, contents: nil)
+        guard let outputHandle = FileHandle(forWritingAtPath: outputURL.path) else {
+            return [:]
+        }
         process.executableURL = URL(fileURLWithPath: "/usr/bin/sqlite3")
         process.arguments = [
             "-json",
@@ -1366,11 +1425,15 @@ final class CodexUsageStore {
               coalesce(model, '') as model,
               coalesce(reasoning_effort, '') as reasoning_effort,
               substr(replace(replace(coalesce(title, ''), char(10), ' '), char(9), ' '), 1, 120) as title,
+              substr(replace(replace(coalesce(first_user_message, ''), char(10), ' '), char(9), ' '), 1, 120) as first_user_message,
+              substr(replace(replace(coalesce(preview, ''), char(10), ' '), char(9), ' '), 1, 120) as preview,
               coalesce(cwd, '') as cwd
+              , coalesce(recency_at_ms, updated_at_ms, created_at_ms, 0) as recency_at_ms
+              , coalesce(updated_at_ms, created_at_ms, 0) as updated_at_ms
             from threads;
             """
         ]
-        process.standardOutput = output
+        process.standardOutput = outputHandle
         process.standardError = Pipe()
 
         do {
@@ -1390,11 +1453,14 @@ final class CodexUsageStore {
         }
 
         process.waitUntilExit()
+        try? outputHandle.close()
         guard process.terminationStatus == 0 else {
+            try? FileManager.default.removeItem(at: outputURL)
             return [:]
         }
 
-        let data = output.fileHandleForReading.readDataToEndOfFile()
+        let data = (try? Data(contentsOf: outputURL)) ?? Data()
+        try? FileManager.default.removeItem(at: outputURL)
         guard let rows = try? JSONDecoder().decode([ThreadRow].self, from: data) else {
             return [:]
         }
@@ -1404,22 +1470,49 @@ final class CodexUsageStore {
             result[row.id.lowercased()] = ThreadMeta(
                 model: row.model ?? "",
                 effort: row.reasoning_effort ?? "",
-                title: sanitizeTitle(row.title ?? ""),
-                cwd: row.cwd ?? ""
+                title: preferredThreadTitle(
+                    title: row.title ?? "",
+                    preview: row.preview ?? "",
+                    firstUserMessage: row.first_user_message ?? "",
+                    threadID: row.id
+                ),
+                cwd: row.cwd ?? "",
+                lastActivityMS: max(row.recency_at_ms ?? 0, row.updated_at_ms ?? 0)
             )
         }
         return result
     }
 
-    private func sanitizeTitle(_ title: String) -> String {
-        let collapsed = title
+    private func preferredThreadTitle(title: String, preview: String, firstUserMessage: String, threadID: String) -> String {
+        func collapsed(_ value: String) -> String {
+            value
             .replacingOccurrences(of: "\n", with: " ")
             .replacingOccurrences(of: "\t", with: " ")
             .trimmingCharacters(in: .whitespacesAndNewlines)
-        if collapsed.count <= 80 {
-            return collapsed
         }
-        return String(collapsed.prefix(77)) + "..."
+        func shortened(_ value: String) -> String {
+            let trimmed = collapsed(value)
+            if trimmed.count <= 80 {
+                return trimmed
+            }
+            return String(trimmed.prefix(77)) + "..."
+        }
+
+        let candidates = [title, preview, firstUserMessage]
+            .map(shortened)
+            .filter { !$0.isEmpty }
+            .filter { normalizedThreadTitle($0) }
+
+        if let candidate = candidates.first {
+            return candidate
+        }
+
+        return threadID
+    }
+
+    private func normalizedThreadTitle(_ title: String) -> Bool {
+        let lower = title.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        return !lower.isEmpty && lower != "untitled" && lower != "untitled conversation" && lower != "untitled thread"
     }
 
     private func nonEmptyString(_ value: Any?) -> String? {
@@ -1735,23 +1828,59 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func addThreadSubmenu(to menu: NSMenu) {
-        let item = NSMenuItem(title: "By Thread", action: nil, keyEquivalent: "")
+        let item = NSMenuItem(title: "By Conversation", action: nil, keyEquivalent: "")
         let submenu = NSMenu()
         submenu.autoenablesItems = false
 
         if currentSnapshot.byThread.isEmpty {
-            submenu.addItem(staticItem("No thread metadata yet"))
+            submenu.addItem(staticItem("No conversation metadata yet"))
         } else {
             for summary in currentSnapshot.byThread.prefix(16) {
+                let conversationItem = NSMenuItem(title: conversationTitle(summary), action: nil, keyEquivalent: "")
+                let conversationMenu = NSMenu()
+                conversationMenu.autoenablesItems = false
                 let aggregate = summary.aggregate
-                submenu.addItem(staticItem(
-                    "\(summary.title): \(Formatters.money(aggregate.cost.total, currency: currencyState)) · \(Formatters.tokens(aggregate.usage.totalTokens)) · \(aggregate.requests) turns"
-                ))
+
+                conversationMenu.addItem(staticItem("Spend: \(Formatters.money(aggregate.cost.total, currency: currencyState))\(estimateSuffix)"))
+                conversationMenu.addItem(staticItem("Turns: \(aggregate.requests) · Tokens: \(Formatters.tokens(aggregate.usage.totalTokens))"))
+                if !summary.cwd.isEmpty {
+                    conversationMenu.addItem(staticItem("Folder: \(summary.cwd)"))
+                }
+                conversationMenu.addItem(staticItem("Thread ID: \(summary.threadID)"))
+
+                if summary.breakdowns.isEmpty {
+                    conversationMenu.addItem(staticItem("No model breakdown available"))
+                } else {
+                    conversationMenu.addItem(headerItem("Models / Effort / Speed"))
+                    for breakdown in summary.breakdowns.prefix(12) {
+                        conversationMenu.addItem(staticItem(
+                            "\(breakdownLabel(breakdown)): \(Formatters.money(breakdown.aggregate.cost.total, currency: currencyState)) · \(Formatters.tokens(breakdown.aggregate.usage.totalTokens)) · \(breakdown.aggregate.requests) turns"
+                        ))
+                    }
+                }
+
+                conversationItem.submenu = conversationMenu
+                submenu.addItem(conversationItem)
             }
         }
 
         item.submenu = submenu
         menu.addItem(item)
+    }
+
+    private func conversationTitle(_ summary: ThreadSummary) -> String {
+        let title = summary.title.trimmingCharacters(in: .whitespacesAndNewlines)
+        if title.isEmpty {
+            return summary.threadID
+        }
+        return title
+    }
+
+    private func breakdownLabel(_ summary: ThreadBreakdownSummary) -> String {
+        let model = summary.model.isEmpty ? "unknown model" : summary.model
+        let effort = summary.effort.isEmpty ? "unknown effort" : summary.effort
+        let speed = summary.speed.isEmpty ? "standard" : summary.speed
+        return "\(model) · \(effort) · \(speed)"
     }
 
     private func addRecentRequestsSubmenu(to menu: NSMenu) {

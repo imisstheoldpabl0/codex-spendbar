@@ -80,7 +80,8 @@ Current menu features:
 - Warning coloring for daily spend and expensive prompt turns.
 - Recent spike detection against active recent days.
 - Trend charts with selectable block, line, or ASCII rendering.
-- Monthly, project-folder, thread, model, and prompt-turn breakdowns.
+- Monthly, project-folder, conversation, model, and prompt-turn breakdowns.
+- Conversation rows drill into per-model, per-reasoning-effort, and per-speed totals.
 - Preferences for currency, thresholds, chart mode, estimate labels, and start at login.
 - Privacy indicator showing local files read and the optional EUR-rate network call.
 
