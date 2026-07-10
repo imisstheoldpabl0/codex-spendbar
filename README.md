@@ -56,6 +56,11 @@ Those rates come from the OpenAI API pricing page. Standard, flex, priority, and
 long-context rates are represented separately when OpenAI publishes different
 prices for those tiers.
 
+The table includes current GPT-5.6 Sol, Terra, and Luna pricing while keeping
+older GPT-5.5, GPT-5.4, and Codex model entries so historical local sessions
+continue to receive the rates that match their recorded model names. The
+`gpt-5.6` alias is priced as `gpt-5.6-sol`.
+
 Reasoning effort is not a separate price multiplier in this app. OpenAI bills
 reasoning tokens as output tokens, so higher reasoning effort affects cost by
 changing how many reasoning output tokens are generated. The per-token rate is
@@ -66,10 +71,10 @@ or local config exposes a `fast` or `priority` service tier. Flex mode is
 estimated with flex rates when exposed. Otherwise, the app falls back to standard
 rates for the detected model.
 
-For GPT-5.5 and GPT-5.4, long-context pricing is used when the recorded input
-token count is above 272K, matching OpenAI's published threshold for those
-models. Unknown models or tiers are counted for tokens, but their price is marked
-as unpriced and contributes `$0.00` to the estimate.
+For GPT-5.6, GPT-5.5, and GPT-5.4 family models, long-context pricing is used
+when the recorded input token count is above 272K. Unknown models or tiers are
+counted for tokens, but their price is marked as unpriced and contributes
+`$0.00` to the estimate.
 
 EUR display is calculated after the USD estimate by multiplying by the cached
 USD-to-EUR reference rate.

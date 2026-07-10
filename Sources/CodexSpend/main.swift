@@ -314,6 +314,9 @@ enum PricingTable {
 
     private static func canonical(_ model: String) -> String {
         let lower = model.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        if lower == "gpt-5.6" {
+            return "gpt-5.6-sol"
+        }
         if lower.hasPrefix("gpt-5.1-codex-max") {
             return "gpt-5.1-codex"
         }
@@ -332,7 +335,7 @@ enum PricingTable {
     }
 
     private static func isLikelyLongContext(model: String, usage: TokenUsage, modelContextWindow: Int64?) -> Bool {
-        guard model == "gpt-5.5" || model == "gpt-5.4" else {
+        guard model.hasPrefix("gpt-5.6-") || model == "gpt-5.5" || model == "gpt-5.4" else {
             return false
         }
 
@@ -340,6 +343,9 @@ enum PricingTable {
     }
 
     private static let standardRates: [String: PricingRates] = [
+        "gpt-5.6-sol": PricingRates(inputPerMillion: 5.00, cachedInputPerMillion: 0.50, outputPerMillion: 30.00),
+        "gpt-5.6-terra": PricingRates(inputPerMillion: 2.50, cachedInputPerMillion: 0.25, outputPerMillion: 15.00),
+        "gpt-5.6-luna": PricingRates(inputPerMillion: 1.00, cachedInputPerMillion: 0.10, outputPerMillion: 6.00),
         "gpt-5.5": PricingRates(inputPerMillion: 5.00, cachedInputPerMillion: 0.50, outputPerMillion: 30.00),
         "gpt-5.4": PricingRates(inputPerMillion: 2.50, cachedInputPerMillion: 0.25, outputPerMillion: 15.00),
         "gpt-5.4-mini": PricingRates(inputPerMillion: 0.75, cachedInputPerMillion: 0.075, outputPerMillion: 4.50),
@@ -354,11 +360,17 @@ enum PricingTable {
     ]
 
     private static let longContextRates: [String: PricingRates] = [
+        "gpt-5.6-sol": PricingRates(inputPerMillion: 10.00, cachedInputPerMillion: 1.00, outputPerMillion: 45.00),
+        "gpt-5.6-terra": PricingRates(inputPerMillion: 5.00, cachedInputPerMillion: 0.50, outputPerMillion: 22.50),
+        "gpt-5.6-luna": PricingRates(inputPerMillion: 2.00, cachedInputPerMillion: 0.20, outputPerMillion: 9.00),
         "gpt-5.5": PricingRates(inputPerMillion: 10.00, cachedInputPerMillion: 1.00, outputPerMillion: 45.00),
         "gpt-5.4": PricingRates(inputPerMillion: 5.00, cachedInputPerMillion: 0.50, outputPerMillion: 22.50)
     ]
 
     private static let fastRates: [String: PricingRates] = [
+        "gpt-5.6-sol": PricingRates(inputPerMillion: 10.00, cachedInputPerMillion: 1.00, outputPerMillion: 60.00),
+        "gpt-5.6-terra": PricingRates(inputPerMillion: 5.00, cachedInputPerMillion: 0.50, outputPerMillion: 30.00),
+        "gpt-5.6-luna": PricingRates(inputPerMillion: 2.00, cachedInputPerMillion: 0.20, outputPerMillion: 12.00),
         "gpt-5.5": PricingRates(inputPerMillion: 12.50, cachedInputPerMillion: 1.25, outputPerMillion: 75.00),
         "gpt-5.4": PricingRates(inputPerMillion: 5.00, cachedInputPerMillion: 0.50, outputPerMillion: 30.00),
         "gpt-5.4-mini": PricingRates(inputPerMillion: 1.50, cachedInputPerMillion: 0.15, outputPerMillion: 9.00),
@@ -366,6 +378,9 @@ enum PricingTable {
     ]
 
     private static let flexRates: [String: PricingRates] = [
+        "gpt-5.6-sol": PricingRates(inputPerMillion: 2.50, cachedInputPerMillion: 0.25, outputPerMillion: 15.00),
+        "gpt-5.6-terra": PricingRates(inputPerMillion: 1.25, cachedInputPerMillion: 0.125, outputPerMillion: 7.50),
+        "gpt-5.6-luna": PricingRates(inputPerMillion: 0.50, cachedInputPerMillion: 0.05, outputPerMillion: 3.00),
         "gpt-5.5": PricingRates(inputPerMillion: 2.50, cachedInputPerMillion: 0.25, outputPerMillion: 15.00),
         "gpt-5.4": PricingRates(inputPerMillion: 1.25, cachedInputPerMillion: 0.125, outputPerMillion: 7.50),
         "gpt-5.4-mini": PricingRates(inputPerMillion: 0.375, cachedInputPerMillion: 0.0375, outputPerMillion: 2.25),
@@ -373,6 +388,9 @@ enum PricingTable {
     ]
 
     private static let flexLongContextRates: [String: PricingRates] = [
+        "gpt-5.6-sol": PricingRates(inputPerMillion: 5.00, cachedInputPerMillion: 0.50, outputPerMillion: 22.50),
+        "gpt-5.6-terra": PricingRates(inputPerMillion: 2.50, cachedInputPerMillion: 0.25, outputPerMillion: 11.25),
+        "gpt-5.6-luna": PricingRates(inputPerMillion: 1.00, cachedInputPerMillion: 0.10, outputPerMillion: 4.50),
         "gpt-5.5": PricingRates(inputPerMillion: 5.00, cachedInputPerMillion: 0.50, outputPerMillion: 22.50),
         "gpt-5.4": PricingRates(inputPerMillion: 2.50, cachedInputPerMillion: 0.25, outputPerMillion: 11.25)
     ]
@@ -402,6 +420,12 @@ enum CreditPricingTable {
             return (PricingRates(inputPerMillion: 200.00, cachedInputPerMillion: 50.00, outputPerMillion: 750.00), "image")
         case "gpt-image-2:text":
             return (PricingRates(inputPerMillion: 125.00, cachedInputPerMillion: 31.25, outputPerMillion: 250.00), "text")
+        case "gpt-5.6-sol":
+            return (PricingRates(inputPerMillion: 125.00, cachedInputPerMillion: 12.50, outputPerMillion: 750.00), "standard")
+        case "gpt-5.6-terra":
+            return (PricingRates(inputPerMillion: 62.50, cachedInputPerMillion: 6.25, outputPerMillion: 375.00), "standard")
+        case "gpt-5.6-luna":
+            return (PricingRates(inputPerMillion: 25.00, cachedInputPerMillion: 2.50, outputPerMillion: 150.00), "standard")
         case "gpt-5.5":
             return (PricingRates(inputPerMillion: 125.00, cachedInputPerMillion: 12.50, outputPerMillion: 750.00), "standard")
         case "gpt-5.4":
@@ -430,6 +454,10 @@ enum CreditPricingTable {
                 return "gpt-image-2:text"
             }
             return "gpt-image-2:text"
+        }
+
+        if lower == "gpt-5.6" {
+            return "gpt-5.6-sol"
         }
 
         if lower.hasPrefix("gpt-5.1-codex-max") {
