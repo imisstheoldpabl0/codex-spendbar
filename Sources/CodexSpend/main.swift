@@ -63,7 +63,6 @@ struct CreditBreakdown {
 }
 
 let defaultMonthlyCreditBudgetCredits: Double = 7000
-let monthlyCreditDollarRatePerCredit: Double = 200.0 / 5000.0
 
 struct RequestUsage {
     let timestamp: Date
@@ -199,14 +198,29 @@ struct SpendSnapshot {
         preferences: AppPreferences = PreferencesStore().load()
     ) -> String {
         let monthlyCreditBudgetCredits = preferences.monthlyCreditBudgetCredits
-        let monthlyCreditBudgetUSD = monthlyCreditBudgetCredits * monthlyCreditDollarRatePerCredit
+        let spendText: (UsageAggregate) -> String = { aggregate in
+            switch preferences.spendDisplayMode {
+            case .price:
+                return Formatters.money(aggregate.cost.total, currency: currency)
+            case .credits:
+                return "\(Formatters.credits(aggregate.credits.total)) credits · \(Formatters.money(aggregate.cost.total, currency: currency))"
+            }
+        }
+        let compactSpendText: (UsageAggregate) -> String = { aggregate in
+            switch preferences.spendDisplayMode {
+            case .price:
+                return Formatters.money(aggregate.cost.total, currency: currency)
+            case .credits:
+                return "\(Formatters.credits(aggregate.credits.total)) credits"
+            }
+        }
         var lines: [String] = []
         lines.append("Codex Spend")
         lines.append("Generated: \(Formatters.fullDateTime.string(from: generatedAt))")
         lines.append("Currency: \(currency.code.rawValue)")
         lines.append("Current month: \(Formatters.credits(currentMonth.credits.total)) credits spent · \(Formatters.money(currentMonth.cost.total, currency: currency))")
         let remainingCredits = monthlyCreditBudgetCredits - currentMonth.credits.total
-        lines.append("Monthly budget: \(Formatters.credits(monthlyCreditBudgetCredits)) credits · \(Formatters.money(monthlyCreditBudgetUSD, currency: currency))")
+        lines.append("Monthly budget: \(Formatters.credits(monthlyCreditBudgetCredits)) credits")
         if remainingCredits < 0 {
             lines.append("Over budget: \(Formatters.credits(abs(remainingCredits))) credits")
         } else {
@@ -218,8 +232,8 @@ struct SpendSnapshot {
                 lines.append("  \(Formatters.shortTime.string(from: request.timestamp)) · \(request.model.isEmpty ? "unknown model" : request.model) · unpriced")
             }
         }
-        lines.append("Today: \(Formatters.money(today.cost.total, currency: currency)) · \(Formatters.tokens(today.usage.totalTokens)) tokens · \(today.requests) turns")
-        lines.append("All time: \(Formatters.money(allTime.cost.total, currency: currency)) · \(Formatters.tokens(allTime.usage.totalTokens)) tokens · \(allTime.requests) turns")
+        lines.append("Today: \(spendText(today)) · \(Formatters.tokens(today.usage.totalTokens)) tokens · \(today.requests) turns")
+        lines.append("All time: \(spendText(allTime)) · \(Formatters.tokens(allTime.usage.totalTokens)) tokens · \(allTime.requests) turns")
         lines.append("Today categories:")
         lines.append("  Input: \(Formatters.tokens(today.usage.uncachedInputTokens)) · \(Formatters.money(today.cost.uncachedInput, currency: currency))")
         lines.append("  Cached input: \(Formatters.tokens(today.usage.cachedInputTokens)) · \(Formatters.money(today.cost.cachedInput, currency: currency))")
@@ -227,23 +241,23 @@ struct SpendSnapshot {
         lines.append("  Reasoning: \(Formatters.tokens(today.usage.reasoningOutputTokens)) · \(Formatters.money(today.cost.reasoningOutput, currency: currency))")
         lines.append("Recent days:")
         for day in days {
-            lines.append("  \(Formatters.shortDay.string(from: day.date)): \(Formatters.money(day.aggregate.cost.total, currency: currency)) · \(Formatters.tokens(day.aggregate.usage.totalTokens)) · \(day.aggregate.requests) turns")
+            lines.append("  \(Formatters.shortDay.string(from: day.date)): \(compactSpendText(day.aggregate)) · \(Formatters.tokens(day.aggregate.usage.totalTokens)) · \(day.aggregate.requests) turns")
         }
         lines.append("Recent months:")
         for month in months.filter({ $0.monthStart != currentMonthStart }).prefix(12) {
-            lines.append("  \(Formatters.month.string(from: month.monthStart)): \(Formatters.money(month.aggregate.cost.total, currency: currency)) · \(Formatters.tokens(month.aggregate.usage.totalTokens)) · \(month.aggregate.requests) turns")
+            lines.append("  \(Formatters.month.string(from: month.monthStart)): \(compactSpendText(month.aggregate)) · \(Formatters.tokens(month.aggregate.usage.totalTokens)) · \(month.aggregate.requests) turns")
         }
         lines.append("By model:")
         for summary in byModel.prefix(8) {
-            lines.append("  \(summary.key): \(Formatters.money(summary.aggregate.cost.total, currency: currency)) · \(Formatters.tokens(summary.aggregate.usage.totalTokens)) · \(summary.aggregate.requests) turns")
+            lines.append("  \(summary.key): \(compactSpendText(summary.aggregate)) · \(Formatters.tokens(summary.aggregate.usage.totalTokens)) · \(summary.aggregate.requests) turns")
         }
         lines.append("By project:")
         for summary in byProject.prefix(8) {
-            lines.append("  \(summary.project): \(Formatters.money(summary.aggregate.cost.total, currency: currency)) · \(Formatters.tokens(summary.aggregate.usage.totalTokens)) · \(summary.aggregate.requests) turns")
+            lines.append("  \(summary.project): \(compactSpendText(summary.aggregate)) · \(Formatters.tokens(summary.aggregate.usage.totalTokens)) · \(summary.aggregate.requests) turns")
         }
         lines.append("By thread:")
         for summary in byThread.prefix(8) {
-            lines.append("  \(summary.title): \(Formatters.money(summary.aggregate.cost.total, currency: currency)) · \(Formatters.tokens(summary.aggregate.usage.totalTokens)) · \(summary.aggregate.requests) turns")
+            lines.append("  \(summary.title): \(compactSpendText(summary.aggregate)) · \(Formatters.tokens(summary.aggregate.usage.totalTokens)) · \(summary.aggregate.requests) turns")
         }
         if parseErrorCount > 0 {
             lines.append("Skipped malformed records: \(parseErrorCount)")
@@ -489,11 +503,17 @@ enum TrendChartMode: String, CaseIterable {
     case ascii = "ASCII"
 }
 
+enum SpendDisplayMode: String, CaseIterable {
+    case price = "Price"
+    case credits = "Credits"
+}
+
 struct AppPreferences {
     var dailyWarningUSD: Double
     var requestWarningUSD: Double
     var spikeMultiplier: Double
     var monthlyCreditBudgetCredits: Double
+    var spendDisplayMode: SpendDisplayMode
     var chartMode: TrendChartMode
     var showEstimateLabels: Bool
 }
@@ -504,6 +524,7 @@ final class PreferencesStore {
     private let requestWarningKey = "requestWarningUSD"
     private let spikeMultiplierKey = "spikeMultiplier"
     private let monthlyCreditBudgetKey = "monthlyCreditBudgetCredits"
+    private let spendDisplayModeKey = "spendDisplayMode"
     private let chartModeKey = "chartMode"
     private let showEstimateLabelsKey = "showEstimateLabels"
 
@@ -512,6 +533,7 @@ final class PreferencesStore {
         let request = defaults.object(forKey: requestWarningKey) as? Double ?? 3
         let spike = defaults.object(forKey: spikeMultiplierKey) as? Double ?? 2
         let monthlyCreditBudget = defaults.object(forKey: monthlyCreditBudgetKey) as? Double ?? defaultMonthlyCreditBudgetCredits
+        let displayMode = SpendDisplayMode(rawValue: defaults.string(forKey: spendDisplayModeKey) ?? "") ?? .price
         let mode = TrendChartMode(rawValue: defaults.string(forKey: chartModeKey) ?? "") ?? .blocks
         let showLabels = defaults.object(forKey: showEstimateLabelsKey) as? Bool ?? false
         return AppPreferences(
@@ -519,6 +541,7 @@ final class PreferencesStore {
             requestWarningUSD: max(request, 0),
             spikeMultiplier: max(spike, 1),
             monthlyCreditBudgetCredits: max(monthlyCreditBudget, 0),
+            spendDisplayMode: displayMode,
             chartMode: mode,
             showEstimateLabels: showLabels
         )
@@ -529,6 +552,7 @@ final class PreferencesStore {
         defaults.set(preferences.requestWarningUSD, forKey: requestWarningKey)
         defaults.set(preferences.spikeMultiplier, forKey: spikeMultiplierKey)
         defaults.set(preferences.monthlyCreditBudgetCredits, forKey: monthlyCreditBudgetKey)
+        defaults.set(preferences.spendDisplayMode.rawValue, forKey: spendDisplayModeKey)
         defaults.set(preferences.chartMode.rawValue, forKey: chartModeKey)
         defaults.set(preferences.showEstimateLabels, forKey: showEstimateLabelsKey)
     }
@@ -758,18 +782,7 @@ final class Formatters {
     }
 
     static func credits(_ value: Double) -> String {
-        if value == 0 {
-            return "0"
-        }
-
-        var formatted = String(format: "%.3f", value)
-        while formatted.contains(".") && formatted.hasSuffix("0") {
-            formatted.removeLast()
-        }
-        if formatted.hasSuffix(".") {
-            formatted.removeLast()
-        }
-        return formatted
+        String(format: "%.0f", value.rounded())
     }
 
     static func tokens(_ value: Int64) -> String {
@@ -1863,8 +1876,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
 
-        let title = "Codex \(Formatters.money(currentSnapshot.today.cost.total, currency: currencyState))"
-        let warning = preferences.dailyWarningUSD > 0 && currentSnapshot.today.cost.total >= preferences.dailyWarningUSD
+        let title = "Codex \(statusDisplayText())"
+        let warning = statusIsWarning
         button.attributedTitle = NSAttributedString(
             string: title,
             attributes: [
@@ -1872,8 +1885,35 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 .foregroundColor: warning ? NSColor.systemRed : NSColor.labelColor
             ]
         )
-        button.toolTip = "Today: \(Formatters.money(currentSnapshot.today.cost.total, currency: currencyState))\(estimateSuffix) · \(Formatters.tokens(currentSnapshot.today.usage.totalTokens)) tokens · \(currentSnapshot.today.requests) turns"
+        button.toolTip = tooltipText()
         statusItem.menu = makeMenu()
+    }
+
+    private func statusDisplayText() -> String {
+        switch preferences.spendDisplayMode {
+        case .price:
+            return Formatters.money(currentSnapshot.today.cost.total, currency: currencyState)
+        case .credits:
+            return "\(Formatters.credits(currentSnapshot.currentMonth.credits.total)) cr"
+        }
+    }
+
+    private var statusIsWarning: Bool {
+        switch preferences.spendDisplayMode {
+        case .price:
+            return preferences.dailyWarningUSD > 0 && currentSnapshot.today.cost.total >= preferences.dailyWarningUSD
+        case .credits:
+            return preferences.monthlyCreditBudgetCredits > 0 && currentSnapshot.currentMonth.credits.total >= preferences.monthlyCreditBudgetCredits
+        }
+    }
+
+    private func tooltipText() -> String {
+        switch preferences.spendDisplayMode {
+        case .price:
+            return "Today: \(Formatters.money(currentSnapshot.today.cost.total, currency: currencyState))\(estimateSuffix) · \(Formatters.tokens(currentSnapshot.today.usage.totalTokens)) tokens · \(currentSnapshot.today.requests) turns"
+        case .credits:
+            return "Current month: \(Formatters.credits(currentSnapshot.currentMonth.credits.total)) credits · Today: \(Formatters.credits(currentSnapshot.today.credits.total)) credits · \(currentSnapshot.today.requests) turns"
+        }
     }
 
     private func makeMenu() -> NSMenu {
@@ -1931,7 +1971,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func addCurrentMonthSection(to menu: NSMenu) {
         let currentMonth = currentSnapshot.currentMonth
         let monthlyCreditBudgetCredits = preferences.monthlyCreditBudgetCredits
-        let monthlyCreditBudgetUSD = monthlyCreditBudgetCredits * monthlyCreditDollarRatePerCredit
         let spentCredits = currentMonth.credits.total
         let remainingCredits = monthlyCreditBudgetCredits - spentCredits
         let overBudget = remainingCredits < 0
@@ -1951,7 +1990,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             warning: overBudget
         ))
         menu.addItem(staticItem(
-            "Budget: \(Formatters.credits(monthlyCreditBudgetCredits)) credits · \(Formatters.money(monthlyCreditBudgetUSD, currency: currencyState))"
+            "Budget: \(Formatters.credits(monthlyCreditBudgetCredits)) credits"
         ))
         menu.addItem(staticItem("Turns: \(currentMonth.requests) · Tokens: \(Formatters.tokens(currentMonth.usage.totalTokens))"))
 
@@ -1989,10 +2028,39 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    private func spendText(_ aggregate: UsageAggregate, includeEstimateSuffix: Bool = false) -> String {
+        let priceText = "\(Formatters.money(aggregate.cost.total, currency: currencyState))\(includeEstimateSuffix ? estimateSuffix : "")"
+        let creditText = "\(Formatters.credits(aggregate.credits.total)) credits"
+        switch preferences.spendDisplayMode {
+        case .price:
+            return priceText
+        case .credits:
+            return "\(creditText) · \(priceText)"
+        }
+    }
+
+    private func compactSpendText(_ aggregate: UsageAggregate) -> String {
+        switch preferences.spendDisplayMode {
+        case .price:
+            return Formatters.money(aggregate.cost.total, currency: currencyState)
+        case .credits:
+            return "\(Formatters.credits(aggregate.credits.total)) cr"
+        }
+    }
+
+    private func requestSpendText(_ request: RequestUsage) -> String {
+        switch preferences.spendDisplayMode {
+        case .price:
+            return Formatters.money(request.cost.total, currency: currencyState)
+        case .credits:
+            return "\(Formatters.credits(request.credits.total)) cr · \(Formatters.money(request.cost.total, currency: currencyState))"
+        }
+    }
+
     private func addTodaySection(to menu: NSMenu) {
         let today = currentSnapshot.today
         menu.addItem(headerItem("Today"))
-        menu.addItem(staticItem("Spend: \(Formatters.money(today.cost.total, currency: currencyState))\(estimateSuffix)", warning: isDailyWarning))
+        menu.addItem(staticItem("Spend: \(spendText(today, includeEstimateSuffix: true))", warning: isDailyWarning))
         menu.addItem(staticItem("Turns: \(today.requests) · Tokens: \(Formatters.tokens(today.usage.totalTokens))"))
         menu.addItem(staticItem("Input: \(Formatters.tokens(today.usage.uncachedInputTokens)) · \(Formatters.money(today.cost.uncachedInput, currency: currencyState))"))
         menu.addItem(staticItem("Cached input: \(Formatters.tokens(today.usage.cachedInputTokens)) · \(Formatters.money(today.cost.cachedInput, currency: currencyState))"))
@@ -2009,7 +2077,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func addTrendSection(to menu: NSMenu) {
-        let values = currentSnapshot.days.reversed().map { $0.aggregate.cost.total }
+        let values = currentSnapshot.days.reversed().map { day in
+            switch preferences.spendDisplayMode {
+            case .price:
+                return day.aggregate.cost.total
+            case .credits:
+                return day.aggregate.credits.total
+            }
+        }
         let chart = TrendRenderer.render(values: values, mode: preferences.chartMode)
         menu.addItem(headerItem("Trend"))
         menu.addItem(staticItem("\(preferences.chartMode.rawValue): \(chart)"))
@@ -2033,7 +2108,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let item = NSMenuItem(title: "All Time", action: nil, keyEquivalent: "")
         let submenu = NSMenu()
         submenu.autoenablesItems = false
-        submenu.addItem(staticItem("Spend: \(Formatters.money(allTime.cost.total, currency: currencyState))\(estimateSuffix)"))
+        submenu.addItem(staticItem("Spend: \(spendText(allTime, includeEstimateSuffix: true))"))
         submenu.addItem(staticItem("Turns: \(allTime.requests) · Tokens: \(Formatters.tokens(allTime.usage.totalTokens))"))
 
         if let first = currentSnapshot.firstRequestAt, let last = currentSnapshot.lastRequestAt {
@@ -2056,7 +2131,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             for day in activeDays {
                 let aggregate = day.aggregate
                 submenu.addItem(staticItem(
-                    "\(Formatters.shortDay.string(from: day.date)): \(Formatters.money(aggregate.cost.total, currency: currencyState)) · \(Formatters.tokens(aggregate.usage.totalTokens)) · \(aggregate.requests) turns",
+                    "\(Formatters.shortDay.string(from: day.date)): \(compactSpendText(aggregate)) · \(Formatters.tokens(aggregate.usage.totalTokens)) · \(aggregate.requests) turns",
                     warning: preferences.dailyWarningUSD > 0 && aggregate.cost.total >= preferences.dailyWarningUSD
                 ))
             }
@@ -2079,7 +2154,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             for month in historicalMonths {
                 let aggregate = month.aggregate
                 submenu.addItem(staticItem(
-                    "\(Formatters.month.string(from: month.monthStart)): \(Formatters.money(aggregate.cost.total, currency: currencyState)) · \(Formatters.tokens(aggregate.usage.totalTokens)) · \(aggregate.requests) turns"
+                    "\(Formatters.month.string(from: month.monthStart)): \(compactSpendText(aggregate)) · \(Formatters.tokens(aggregate.usage.totalTokens)) · \(aggregate.requests) turns"
                 ))
             }
         }
@@ -2099,7 +2174,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             for summary in currentSnapshot.byModel.prefix(16) {
                 let aggregate = summary.aggregate
                 submenu.addItem(staticItem(
-                    "\(summary.key): \(Formatters.money(aggregate.cost.total, currency: currencyState)) · \(Formatters.tokens(aggregate.usage.totalTokens)) · \(aggregate.requests) turns"
+                    "\(summary.key): \(compactSpendText(aggregate)) · \(Formatters.tokens(aggregate.usage.totalTokens)) · \(aggregate.requests) turns"
                 ))
             }
         }
@@ -2119,7 +2194,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             for summary in currentSnapshot.byProject.prefix(16) {
                 let aggregate = summary.aggregate
                 submenu.addItem(staticItem(
-                    "\(summary.project): \(Formatters.money(aggregate.cost.total, currency: currencyState)) · \(Formatters.tokens(aggregate.usage.totalTokens)) · \(aggregate.requests) turns"
+                    "\(summary.project): \(compactSpendText(aggregate)) · \(Formatters.tokens(aggregate.usage.totalTokens)) · \(aggregate.requests) turns"
                 ))
             }
         }
@@ -2142,7 +2217,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 conversationMenu.autoenablesItems = false
                 let aggregate = summary.aggregate
 
-                conversationMenu.addItem(staticItem("Spend: \(Formatters.money(aggregate.cost.total, currency: currencyState))\(estimateSuffix)"))
+                conversationMenu.addItem(staticItem("Spend: \(spendText(aggregate, includeEstimateSuffix: true))"))
                 conversationMenu.addItem(staticItem("Turns: \(aggregate.requests) · Tokens: \(Formatters.tokens(aggregate.usage.totalTokens))"))
                 if !summary.cwd.isEmpty {
                     conversationMenu.addItem(staticItem("Folder: \(summary.cwd)"))
@@ -2155,7 +2230,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     conversationMenu.addItem(headerItem("Models / Effort / Speed"))
                     for breakdown in summary.breakdowns.prefix(12) {
                         conversationMenu.addItem(staticItem(
-                            "\(breakdownLabel(breakdown)): \(Formatters.money(breakdown.aggregate.cost.total, currency: currencyState)) · \(Formatters.tokens(breakdown.aggregate.usage.totalTokens)) · \(breakdown.aggregate.requests) turns"
+                            "\(breakdownLabel(breakdown)): \(compactSpendText(breakdown.aggregate)) · \(Formatters.tokens(breakdown.aggregate.usage.totalTokens)) · \(breakdown.aggregate.requests) turns"
                         ))
                     }
                 }
@@ -2197,7 +2272,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 let effort = request.effort.isEmpty ? "effort?" : request.effort
                 let speed = PricingTable.normalizedSpeed(request.speed)
                 submenu.addItem(staticItem(
-                    "\(Formatters.shortTime.string(from: request.timestamp)) \(model) \(effort) \(speed): \(Formatters.money(request.cost.total, currency: currencyState)) · \(Formatters.tokens(request.usage.totalTokens))",
+                    "\(Formatters.shortTime.string(from: request.timestamp)) \(model) \(effort) \(speed): \(requestSpendText(request)) · \(Formatters.tokens(request.usage.totalTokens))",
                     warning: isRequestWarning(request)
                 ))
             }
@@ -2403,7 +2478,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func copySummary() {
         NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(currentSnapshot.plainTextSummary(currency: currencyState), forType: .string)
+        NSPasteboard.general.setString(
+            currentSnapshot.plainTextSummary(currency: currencyState, preferences: preferences),
+            forType: .string
+        )
     }
 
     @objc private func openCodexSessions() {
@@ -2423,6 +2501,7 @@ final class PreferencesWindowController: NSWindowController {
     private let onSave: (CurrencyState, AppPreferences) -> Void
 
     private let currencyPopup = NSPopUpButton(frame: .zero, pullsDown: false)
+    private let spendDisplayPopup = NSPopUpButton(frame: .zero, pullsDown: false)
     private let chartPopup = NSPopUpButton(frame: .zero, pullsDown: false)
     private let dailyWarningField = NSTextField(frame: .zero)
     private let requestWarningField = NSTextField(frame: .zero)
@@ -2443,7 +2522,7 @@ final class PreferencesWindowController: NSWindowController {
         self.onSave = onSave
 
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 460, height: 430),
+            contentRect: NSRect(x: 0, y: 0, width: 460, height: 470),
             styleMask: [.titled, .closable],
             backing: .buffered,
             defer: false
@@ -2480,9 +2559,11 @@ final class PreferencesWindowController: NSWindowController {
         ])
 
         currencyPopup.addItems(withTitles: CurrencyCode.allCases.map(\.rawValue))
+        spendDisplayPopup.addItems(withTitles: SpendDisplayMode.allCases.map(\.rawValue))
         chartPopup.addItems(withTitles: TrendChartMode.allCases.map(\.rawValue))
 
         stack.addArrangedSubview(row("Currency", currencyPopup))
+        stack.addArrangedSubview(row("Primary spend display", spendDisplayPopup))
         stack.addArrangedSubview(row("Daily warning threshold (USD equivalent)", dailyWarningField))
         stack.addArrangedSubview(row("Per-request warning threshold (USD equivalent)", requestWarningField))
         stack.addArrangedSubview(row("Spike multiplier", spikeMultiplierField))
@@ -2540,6 +2621,7 @@ final class PreferencesWindowController: NSWindowController {
         let preferences = preferencesStore.load()
 
         currencyPopup.selectItem(withTitle: currency.code.rawValue)
+        spendDisplayPopup.selectItem(withTitle: preferences.spendDisplayMode.rawValue)
         chartPopup.selectItem(withTitle: preferences.chartMode.rawValue)
         dailyWarningField.stringValue = String(format: "%.2f", preferences.dailyWarningUSD)
         requestWarningField.stringValue = String(format: "%.2f", preferences.requestWarningUSD)
@@ -2552,6 +2634,7 @@ final class PreferencesWindowController: NSWindowController {
     @objc private func save() {
         let currencyCode = CurrencyCode(rawValue: currencyPopup.titleOfSelectedItem ?? "") ?? .usd
         let currency = currencyStore.setCurrency(currencyCode)
+        let spendDisplayMode = SpendDisplayMode(rawValue: spendDisplayPopup.titleOfSelectedItem ?? "") ?? .price
         let chartMode = TrendChartMode(rawValue: chartPopup.titleOfSelectedItem ?? "") ?? .blocks
 
         let preferences = AppPreferences(
@@ -2559,6 +2642,7 @@ final class PreferencesWindowController: NSWindowController {
             requestWarningUSD: max(requestWarningField.doubleValue, 0),
             spikeMultiplier: max(spikeMultiplierField.doubleValue, 1),
             monthlyCreditBudgetCredits: max(monthlyCreditBudgetField.doubleValue, 0),
+            spendDisplayMode: spendDisplayMode,
             chartMode: chartMode,
             showEstimateLabels: showEstimateLabelsCheckbox.state == .on
         )
