@@ -15,8 +15,8 @@ available to fill in thread titles and older model/reasoning metadata.
 
 The dollar values are API-equivalent estimates, not an official invoice. For
 ChatGPT-backed Codex usage, Codex can consume plan credits rather than billing
-direct API dollars. Fast mode is estimated with the higher priority/fast rates
-when the session metadata or config exposes it.
+direct API dollars. Fast mode is estimated with the higher Fast mode rates
+(formerly Priority processing) when the session metadata or config exposes it.
 
 The menu can render estimates in USD or EUR. OpenAI API pricing is USD, so EUR
 display uses a cached USD-to-EUR reference rate from Frankfurter and refreshes it
@@ -52,21 +52,21 @@ prices each event with the model, speed, and context information available for
 that event, then rolls the priced events up into one visible prompt turn.
 
 Rates are hardcoded in `Sources/CodexSpend/main.swift` under `PricingTable`.
-Those rates come from the OpenAI API pricing page. Standard, flex, priority, and
+Those rates come from the OpenAI API pricing page. Standard, flex, fast, and
 long-context rates are represented separately when OpenAI publishes different
 prices for those tiers.
 
-The table includes current GPT-5.6 Sol, Terra, and Luna pricing while keeping
-older GPT-5.5, GPT-5.4, and Codex model entries so historical local sessions
-continue to receive the rates that match their recorded model names. The
-`gpt-5.6` alias is priced as `gpt-5.6-sol`.
+The table includes current GPT-5.6 Sol, Terra, and Luna pricing, GPT-5.5 and
+GPT-5.4 Pro variants, and the existing Codex model entries so historical local
+sessions continue to receive the rates that match their recorded model names.
+The `gpt-5.6` alias is priced as `gpt-5.6-sol`.
 
 Reasoning effort is not a separate price multiplier in this app. OpenAI bills
 reasoning tokens as output tokens, so higher reasoning effort affects cost by
 changing how many reasoning output tokens are generated. The per-token rate is
 still the model's output rate.
 
-Fast mode is estimated with OpenAI priority processing rates when Codex metadata
+Fast mode is estimated with OpenAI Fast mode rates when Codex metadata
 or local config exposes a `fast` or `priority` service tier. Flex mode is
 estimated with flex rates when exposed. Otherwise, the app falls back to standard
 rates for the detected model.
@@ -93,7 +93,7 @@ Current menu features:
 Pricing and FX references:
 
 - OpenAI API pricing: https://developers.openai.com/api/docs/pricing
-- OpenAI priority processing: https://developers.openai.com/api/docs/guides/priority-processing
+- OpenAI Fast mode: https://developers.openai.com/api/docs/guides/fast-mode
 - OpenAI reasoning guide: https://developers.openai.com/api/docs/guides/reasoning
 - USD/EUR reference rates: https://frankfurter.dev/
 
