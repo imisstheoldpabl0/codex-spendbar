@@ -303,6 +303,13 @@ enum PricingTable {
         let tier = normalizedSpeed(speed)
         let longContext = isLikelyLongContext(model: canonicalModel, usage: usage, modelContextWindow: modelContextWindow)
 
+        if tier == "ultrafast" {
+            guard canonicalModel == "gpt-6-astra" else { return nil }
+            return longContext
+                ? (PricingRates(inputPerMillion: 120, cachedInputPerMillion: 12, outputPerMillion: 450), "ultrafast long-context")
+                : (PricingRates(inputPerMillion: 60, cachedInputPerMillion: 6, outputPerMillion: 300), "ultrafast")
+        }
+
         if tier == "fast", longContext, let rates = fastLongContextRates[canonicalModel] {
             return (rates, "fast long-context")
         }
@@ -346,6 +353,9 @@ enum PricingTable {
         if lower == "fast" || lower == "priority" {
             return "fast"
         }
+        if lower == "ultrafast" {
+            return "ultrafast"
+        }
         if lower == "flex" {
             return "flex"
         }
@@ -353,7 +363,7 @@ enum PricingTable {
     }
 
     private static func isLikelyLongContext(model: String, usage: TokenUsage, modelContextWindow: Int64?) -> Bool {
-        guard model.hasPrefix("gpt-6-") || model.hasPrefix("gpt-5.6-") || model == "gpt-5.5" || model == "gpt-5.5-pro" || model == "gpt-5.4" || model == "gpt-5.4-pro" else {
+        guard model.hasPrefix("gpt-6-") || model.hasPrefix("gpt-6.1-") || model.hasPrefix("gpt-5.6-") || model == "gpt-5.5" || model == "gpt-5.5-pro" || model == "gpt-5.4" || model == "gpt-5.4-pro" else {
             return false
         }
 
@@ -363,8 +373,9 @@ enum PricingTable {
     private static let standardRates: [String: PricingRates] = [
         "gpt-6-astra": PricingRates(inputPerMillion: 10.00, cachedInputPerMillion: 1.00, outputPerMillion: 50.00),
         "gpt-6-sol": PricingRates(inputPerMillion: 2.00, cachedInputPerMillion: 0.20, outputPerMillion: 10.00),
+        "gpt-6.1-sol": PricingRates(inputPerMillion: 2.00, cachedInputPerMillion: 0.10, outputPerMillion: 10.00),
         "gpt-6-luna": PricingRates(inputPerMillion: 0.10, cachedInputPerMillion: 0.01, outputPerMillion: 0.50),
-        "gpt-5.6-sol": PricingRates(inputPerMillion: 5.00, cachedInputPerMillion: 0.50, outputPerMillion: 30.00),
+        "gpt-5.6-sol": PricingRates(inputPerMillion: 4.00, cachedInputPerMillion: 0.40, outputPerMillion: 20.00),
         "gpt-5.6-terra": PricingRates(inputPerMillion: 2.00, cachedInputPerMillion: 0.20, outputPerMillion: 12.00),
         "gpt-5.6-luna": PricingRates(inputPerMillion: 0.20, cachedInputPerMillion: 0.02, outputPerMillion: 1.20),
         "gpt-5.5": PricingRates(inputPerMillion: 5.00, cachedInputPerMillion: 0.50, outputPerMillion: 30.00),
@@ -385,8 +396,9 @@ enum PricingTable {
     private static let longContextRates: [String: PricingRates] = [
         "gpt-6-astra": PricingRates(inputPerMillion: 20.00, cachedInputPerMillion: 2.00, outputPerMillion: 75.00),
         "gpt-6-sol": PricingRates(inputPerMillion: 4.00, cachedInputPerMillion: 0.40, outputPerMillion: 15.00),
+        "gpt-6.1-sol": PricingRates(inputPerMillion: 4.00, cachedInputPerMillion: 0.20, outputPerMillion: 15.00),
         "gpt-6-luna": PricingRates(inputPerMillion: 0.20, cachedInputPerMillion: 0.02, outputPerMillion: 0.75),
-        "gpt-5.6-sol": PricingRates(inputPerMillion: 10.00, cachedInputPerMillion: 1.00, outputPerMillion: 45.00),
+        "gpt-5.6-sol": PricingRates(inputPerMillion: 8.00, cachedInputPerMillion: 0.80, outputPerMillion: 30.00),
         "gpt-5.6-terra": PricingRates(inputPerMillion: 4.00, cachedInputPerMillion: 0.40, outputPerMillion: 18.00),
         "gpt-5.6-luna": PricingRates(inputPerMillion: 0.40, cachedInputPerMillion: 0.04, outputPerMillion: 1.80),
         "gpt-5.5": PricingRates(inputPerMillion: 10.00, cachedInputPerMillion: 1.00, outputPerMillion: 45.00),
@@ -398,8 +410,9 @@ enum PricingTable {
     private static let fastRates: [String: PricingRates] = [
         "gpt-6-astra": PricingRates(inputPerMillion: 20.00, cachedInputPerMillion: 2.00, outputPerMillion: 100.00),
         "gpt-6-sol": PricingRates(inputPerMillion: 4.00, cachedInputPerMillion: 0.40, outputPerMillion: 20.00),
+        "gpt-6.1-sol": PricingRates(inputPerMillion: 4.00, cachedInputPerMillion: 0.20, outputPerMillion: 20.00),
         "gpt-6-luna": PricingRates(inputPerMillion: 0.20, cachedInputPerMillion: 0.02, outputPerMillion: 1.00),
-        "gpt-5.6-sol": PricingRates(inputPerMillion: 10.00, cachedInputPerMillion: 1.00, outputPerMillion: 60.00),
+        "gpt-5.6-sol": PricingRates(inputPerMillion: 8.00, cachedInputPerMillion: 0.80, outputPerMillion: 40.00),
         "gpt-5.6-terra": PricingRates(inputPerMillion: 4.00, cachedInputPerMillion: 0.40, outputPerMillion: 24.00),
         "gpt-5.6-luna": PricingRates(inputPerMillion: 0.40, cachedInputPerMillion: 0.04, outputPerMillion: 2.40),
         "gpt-5.5": PricingRates(inputPerMillion: 12.50, cachedInputPerMillion: 1.25, outputPerMillion: 75.00),
@@ -409,16 +422,21 @@ enum PricingTable {
     ]
 
     private static let fastLongContextRates: [String: PricingRates] = [
+        "gpt-5.6-sol": PricingRates(inputPerMillion: 16.00, cachedInputPerMillion: 1.60, outputPerMillion: 60.00),
+        "gpt-5.6-terra": PricingRates(inputPerMillion: 8.00, cachedInputPerMillion: 0.80, outputPerMillion: 36.00),
+        "gpt-5.6-luna": PricingRates(inputPerMillion: 0.80, cachedInputPerMillion: 0.08, outputPerMillion: 3.60),
         "gpt-6-astra": PricingRates(inputPerMillion: 40.00, cachedInputPerMillion: 4.00, outputPerMillion: 150.00),
         "gpt-6-sol": PricingRates(inputPerMillion: 8.00, cachedInputPerMillion: 0.80, outputPerMillion: 30.00),
+        "gpt-6.1-sol": PricingRates(inputPerMillion: 8.00, cachedInputPerMillion: 0.40, outputPerMillion: 30.00),
         "gpt-6-luna": PricingRates(inputPerMillion: 0.40, cachedInputPerMillion: 0.04, outputPerMillion: 1.50)
     ]
 
     private static let flexRates: [String: PricingRates] = [
         "gpt-6-astra": PricingRates(inputPerMillion: 5.00, cachedInputPerMillion: 0.50, outputPerMillion: 25.00),
         "gpt-6-sol": PricingRates(inputPerMillion: 1.00, cachedInputPerMillion: 0.10, outputPerMillion: 5.00),
+        "gpt-6.1-sol": PricingRates(inputPerMillion: 1.00, cachedInputPerMillion: 0.05, outputPerMillion: 5.00),
         "gpt-6-luna": PricingRates(inputPerMillion: 0.05, cachedInputPerMillion: 0.005, outputPerMillion: 0.25),
-        "gpt-5.6-sol": PricingRates(inputPerMillion: 2.50, cachedInputPerMillion: 0.25, outputPerMillion: 15.00),
+        "gpt-5.6-sol": PricingRates(inputPerMillion: 2.00, cachedInputPerMillion: 0.20, outputPerMillion: 10.00),
         "gpt-5.6-terra": PricingRates(inputPerMillion: 1.00, cachedInputPerMillion: 0.10, outputPerMillion: 6.00),
         "gpt-5.6-luna": PricingRates(inputPerMillion: 0.10, cachedInputPerMillion: 0.01, outputPerMillion: 0.60),
         "gpt-5.5": PricingRates(inputPerMillion: 2.50, cachedInputPerMillion: 0.25, outputPerMillion: 15.00),
@@ -432,8 +450,9 @@ enum PricingTable {
     private static let flexLongContextRates: [String: PricingRates] = [
         "gpt-6-astra": PricingRates(inputPerMillion: 10.00, cachedInputPerMillion: 1.00, outputPerMillion: 37.50),
         "gpt-6-sol": PricingRates(inputPerMillion: 2.00, cachedInputPerMillion: 0.20, outputPerMillion: 7.50),
+        "gpt-6.1-sol": PricingRates(inputPerMillion: 2.00, cachedInputPerMillion: 0.10, outputPerMillion: 7.50),
         "gpt-6-luna": PricingRates(inputPerMillion: 0.10, cachedInputPerMillion: 0.01, outputPerMillion: 0.375),
-        "gpt-5.6-sol": PricingRates(inputPerMillion: 5.00, cachedInputPerMillion: 0.50, outputPerMillion: 22.50),
+        "gpt-5.6-sol": PricingRates(inputPerMillion: 4.00, cachedInputPerMillion: 0.40, outputPerMillion: 15.00),
         "gpt-5.6-terra": PricingRates(inputPerMillion: 2.00, cachedInputPerMillion: 0.20, outputPerMillion: 9.00),
         "gpt-5.6-luna": PricingRates(inputPerMillion: 0.20, cachedInputPerMillion: 0.02, outputPerMillion: 0.90),
         "gpt-5.5": PricingRates(inputPerMillion: 5.00, cachedInputPerMillion: 0.50, outputPerMillion: 22.50),
@@ -1666,6 +1685,9 @@ final class CodexUsageStore {
             guard line.hasPrefix("service_tier") else {
                 continue
             }
+            if line.contains("ultrafast") {
+                return "ultrafast"
+            }
             if line.contains("fast") || line.contains("priority") {
                 return "fast"
             }
@@ -2700,6 +2722,42 @@ final class PreferencesWindowController: NSWindowController {
     @objc private func cancel() {
         window?.close()
     }
+}
+
+if CommandLine.arguments.contains("--check-pricing") {
+    // USD per million tokens from the OpenAI pricing page, checked 2026-09-30.
+    let cases: [(String, String, Double, Double, Double, Double, Double, Double)] = [
+        ("gpt-6.1-sol", "standard", 2, 0.10, 10, 4, 0.20, 15),
+        ("gpt-6.1-sol", "fast", 4, 0.20, 20, 8, 0.40, 30),
+        ("gpt-6.1-sol", "priority", 4, 0.20, 20, 8, 0.40, 30),
+        ("gpt-6.1-sol", "flex", 1, 0.05, 5, 2, 0.10, 7.5),
+        ("gpt-6-astra", "ultrafast", 60, 6, 300, 120, 12, 450),
+        ("gpt-5.6-sol", "standard", 4, 0.40, 20, 8, 0.80, 30),
+        ("gpt-5.6-sol", "fast", 8, 0.80, 40, 16, 1.60, 60),
+        ("gpt-5.6-sol", "flex", 2, 0.20, 10, 4, 0.40, 15),
+        ("gpt-5.6-terra", "fast", 4, 0.40, 24, 8, 0.80, 36),
+        ("gpt-5.6-luna", "fast", 0.40, 0.04, 2.40, 0.80, 0.08, 3.60),
+        ("gpt-6-sol", "standard", 2, 0.20, 10, 4, 0.40, 15)
+    ]
+    for (model, speed, input, cached, output, longInput, longCached, longOutput) in cases {
+        for inputTokens: Int64 in [272_000, 272_001] {
+            let long = inputTokens > 272_000
+            let usage = TokenUsage(inputTokens: inputTokens, cachedInputTokens: 100_000,
+                                   outputTokens: 20_000, reasoningOutputTokens: 5_000)
+            let estimate = PricingTable.estimate(for: model, speed: speed, usage: usage, modelContextWindow: nil)
+            precondition(estimate.hasKnownPrice, "Missing price: \(model) \(speed)")
+            let tier = speed == "priority" ? "fast" : speed
+            precondition(estimate.rateLabel == tier + (long ? " long-context" : ""))
+            precondition(abs(estimate.cost.uncachedInput - Double(inputTokens - 100_000) / 1_000_000 * (long ? longInput : input)) < 1e-9)
+            precondition(abs(estimate.cost.cachedInput - 0.1 * (long ? longCached : cached)) < 1e-9)
+            precondition(abs(estimate.cost.visibleOutput - 0.015 * (long ? longOutput : output)) < 1e-9)
+            precondition(abs(estimate.cost.reasoningOutput - 0.005 * (long ? longOutput : output)) < 1e-9)
+        }
+    }
+    let unsupported = PricingTable.estimate(for: "gpt-6.1-sol", speed: "ultrafast", usage: TokenUsage(), modelContextWindow: nil)
+    precondition(!unsupported.hasKnownPrice && unsupported.cost.total == 0)
+    print("Pricing checks passed")
+    exit(EXIT_SUCCESS)
 }
 
 if CommandLine.arguments.contains("--print-summary") {
