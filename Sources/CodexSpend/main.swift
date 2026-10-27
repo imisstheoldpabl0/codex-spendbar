@@ -83,7 +83,7 @@ struct RequestUsage {
     let hasKnownCreditPrice: Bool
 }
 
-struct ThreadMeta {
+struct ThreadMeta: Equatable {
     let model: String
     let effort: String
     let title: String
@@ -98,6 +98,13 @@ struct UsageAggregate {
     var credits = CreditBreakdown()
     var unknownPriceRequests: Int = 0
     var unknownCreditPriceRequests: Int = 0
+
+    func creditText(compact: Bool = false) -> String {
+        if unknownCreditPriceRequests > 0 && credits.total == 0 { return compact ? "? cr" : "Credits unavailable" }
+        let unit = compact ? "cr" : "credits"
+        let suffix = unknownCreditPriceRequests > 0 ? (compact ? " + ?" : " + unpriced") : ""
+        return "\(Formatters.credits(credits.total)) \(unit)\(suffix)"
+    }
 
     mutating func add(_ request: RequestUsage) {
         requests += 1
@@ -152,6 +159,7 @@ struct ProjectSummary {
 
 struct SpendSnapshot {
     let generatedAt: Date
+    let isHistoryComplete: Bool
     let currentMonthStart: Date
     let currentMonth: UsageAggregate
     let currentMonthUnpricedCreditRequests: [RequestUsage]
@@ -175,6 +183,7 @@ struct SpendSnapshot {
         ) ?? calendar.startOfDay(for: generatedAt)
         return SpendSnapshot(
             generatedAt: generatedAt,
+            isHistoryComplete: false,
             currentMonthStart: currentMonthStart,
             currentMonth: UsageAggregate(),
             currentMonthUnpricedCreditRequests: [],
@@ -203,7 +212,7 @@ struct SpendSnapshot {
             case .price:
                 return Formatters.money(aggregate.cost.total, currency: currency)
             case .credits:
-                return "\(Formatters.credits(aggregate.credits.total)) credits · \(Formatters.money(aggregate.cost.total, currency: currency))"
+                return "\(aggregate.creditText()) · \(Formatters.money(aggregate.cost.total, currency: currency))"
             }
         }
         let compactSpendText: (UsageAggregate) -> String = { aggregate in
@@ -211,20 +220,24 @@ struct SpendSnapshot {
             case .price:
                 return Formatters.money(aggregate.cost.total, currency: currency)
             case .credits:
-                return "\(Formatters.credits(aggregate.credits.total)) credits"
+                return aggregate.creditText()
             }
         }
         var lines: [String] = []
         lines.append("Codex Spend")
         lines.append("Generated: \(Formatters.fullDateTime.string(from: generatedAt))")
         lines.append("Currency: \(currency.code.rawValue)")
-        lines.append("Current month: \(Formatters.credits(currentMonth.credits.total)) credits spent · \(Formatters.money(currentMonth.cost.total, currency: currency))")
+        lines.append("Credit estimates from local usage; monthly budget is not an account balance")
+        if !isHistoryComplete { lines.append("Scope: current-month files; older history not loaded") }
+        lines.append("Current month: \(currentMonth.creditText()) spent · \(Formatters.money(currentMonth.cost.total, currency: currency))")
         let remainingCredits = monthlyCreditBudgetCredits - currentMonth.credits.total
         lines.append("Monthly budget: \(Formatters.credits(monthlyCreditBudgetCredits)) credits")
-        if remainingCredits < 0 {
+        if currentMonth.unknownCreditPriceRequests > 0 {
+            lines.append("Remaining budget unavailable: credit total is incomplete")
+        } else if remainingCredits < 0 {
             lines.append("Over budget: \(Formatters.credits(abs(remainingCredits))) credits")
         } else {
-            lines.append("Remaining per Month: \(Formatters.credits(remainingCredits)) credits of \(Formatters.credits(monthlyCreditBudgetCredits))")
+            lines.append("Estimated remaining budget: \(Formatters.credits(remainingCredits)) credits of \(Formatters.credits(monthlyCreditBudgetCredits))")
         }
         if !currentMonthUnpricedCreditRequests.isEmpty {
             lines.append("Unpriced credit requests: \(currentMonthUnpricedCreditRequests.count)")
@@ -233,7 +246,7 @@ struct SpendSnapshot {
             }
         }
         lines.append("Today: \(spendText(today)) · \(Formatters.tokens(today.usage.totalTokens)) tokens · \(today.requests) turns")
-        lines.append("All time: \(spendText(allTime)) · \(Formatters.tokens(allTime.usage.totalTokens)) tokens · \(allTime.requests) turns")
+        if isHistoryComplete { lines.append("All time: \(spendText(allTime)) · \(Formatters.tokens(allTime.usage.totalTokens)) tokens · \(allTime.requests) turns") }
         lines.append("Today categories:")
         lines.append("  Input: \(Formatters.tokens(today.usage.uncachedInputTokens)) · \(Formatters.money(today.cost.uncachedInput, currency: currency))")
         lines.append("  Cached input: \(Formatters.tokens(today.usage.cachedInputTokens)) · \(Formatters.money(today.cost.cachedInput, currency: currency))")
@@ -304,10 +317,12 @@ enum PricingTable {
         let longContext = isLikelyLongContext(model: canonicalModel, usage: usage, modelContextWindow: modelContextWindow)
 
         if tier == "ultrafast" {
-            guard canonicalModel == "gpt-6-astra" else { return nil }
-            return longContext
-                ? (PricingRates(inputPerMillion: 120, cachedInputPerMillion: 12, outputPerMillion: 450), "ultrafast long-context")
-                : (PricingRates(inputPerMillion: 60, cachedInputPerMillion: 6, outputPerMillion: 300), "ultrafast")
+            guard ["gpt-6-astra", "gpt-6.1-sol"].contains(canonicalModel),
+                  let base = longContext ? longContextRates[canonicalModel] : standardRates[canonicalModel] else { return nil }
+            return (PricingRates(inputPerMillion: base.inputPerMillion * 6,
+                                 cachedInputPerMillion: base.cachedInputPerMillion * 6,
+                                 outputPerMillion: base.outputPerMillion * 6),
+                    "ultrafast" + (longContext ? " long-context" : ""))
         }
 
         if tier == "fast", longContext, let rates = fastLongContextRates[canonicalModel] {
@@ -374,6 +389,7 @@ enum PricingTable {
         "gpt-6-astra": PricingRates(inputPerMillion: 10.00, cachedInputPerMillion: 1.00, outputPerMillion: 50.00),
         "gpt-6-sol": PricingRates(inputPerMillion: 2.00, cachedInputPerMillion: 0.20, outputPerMillion: 10.00),
         "gpt-6.1-sol": PricingRates(inputPerMillion: 2.00, cachedInputPerMillion: 0.10, outputPerMillion: 10.00),
+        "gpt-6.1-terra": PricingRates(inputPerMillion: 1.00, cachedInputPerMillion: 0.05, outputPerMillion: 5.00),
         "gpt-6-luna": PricingRates(inputPerMillion: 0.10, cachedInputPerMillion: 0.01, outputPerMillion: 0.50),
         "gpt-5.6-sol": PricingRates(inputPerMillion: 4.00, cachedInputPerMillion: 0.40, outputPerMillion: 20.00),
         "gpt-5.6-terra": PricingRates(inputPerMillion: 2.00, cachedInputPerMillion: 0.20, outputPerMillion: 12.00),
@@ -397,6 +413,7 @@ enum PricingTable {
         "gpt-6-astra": PricingRates(inputPerMillion: 20.00, cachedInputPerMillion: 2.00, outputPerMillion: 75.00),
         "gpt-6-sol": PricingRates(inputPerMillion: 4.00, cachedInputPerMillion: 0.40, outputPerMillion: 15.00),
         "gpt-6.1-sol": PricingRates(inputPerMillion: 4.00, cachedInputPerMillion: 0.20, outputPerMillion: 15.00),
+        "gpt-6.1-terra": PricingRates(inputPerMillion: 2.00, cachedInputPerMillion: 0.10, outputPerMillion: 7.50),
         "gpt-6-luna": PricingRates(inputPerMillion: 0.20, cachedInputPerMillion: 0.02, outputPerMillion: 0.75),
         "gpt-5.6-sol": PricingRates(inputPerMillion: 8.00, cachedInputPerMillion: 0.80, outputPerMillion: 30.00),
         "gpt-5.6-terra": PricingRates(inputPerMillion: 4.00, cachedInputPerMillion: 0.40, outputPerMillion: 18.00),
@@ -411,6 +428,7 @@ enum PricingTable {
         "gpt-6-astra": PricingRates(inputPerMillion: 20.00, cachedInputPerMillion: 2.00, outputPerMillion: 100.00),
         "gpt-6-sol": PricingRates(inputPerMillion: 4.00, cachedInputPerMillion: 0.40, outputPerMillion: 20.00),
         "gpt-6.1-sol": PricingRates(inputPerMillion: 4.00, cachedInputPerMillion: 0.20, outputPerMillion: 20.00),
+        "gpt-6.1-terra": PricingRates(inputPerMillion: 2.00, cachedInputPerMillion: 0.10, outputPerMillion: 10.00),
         "gpt-6-luna": PricingRates(inputPerMillion: 0.20, cachedInputPerMillion: 0.02, outputPerMillion: 1.00),
         "gpt-5.6-sol": PricingRates(inputPerMillion: 8.00, cachedInputPerMillion: 0.80, outputPerMillion: 40.00),
         "gpt-5.6-terra": PricingRates(inputPerMillion: 4.00, cachedInputPerMillion: 0.40, outputPerMillion: 24.00),
@@ -428,6 +446,7 @@ enum PricingTable {
         "gpt-6-astra": PricingRates(inputPerMillion: 40.00, cachedInputPerMillion: 4.00, outputPerMillion: 150.00),
         "gpt-6-sol": PricingRates(inputPerMillion: 8.00, cachedInputPerMillion: 0.80, outputPerMillion: 30.00),
         "gpt-6.1-sol": PricingRates(inputPerMillion: 8.00, cachedInputPerMillion: 0.40, outputPerMillion: 30.00),
+        "gpt-6.1-terra": PricingRates(inputPerMillion: 4.00, cachedInputPerMillion: 0.20, outputPerMillion: 15.00),
         "gpt-6-luna": PricingRates(inputPerMillion: 0.40, cachedInputPerMillion: 0.04, outputPerMillion: 1.50)
     ]
 
@@ -435,6 +454,7 @@ enum PricingTable {
         "gpt-6-astra": PricingRates(inputPerMillion: 5.00, cachedInputPerMillion: 0.50, outputPerMillion: 25.00),
         "gpt-6-sol": PricingRates(inputPerMillion: 1.00, cachedInputPerMillion: 0.10, outputPerMillion: 5.00),
         "gpt-6.1-sol": PricingRates(inputPerMillion: 1.00, cachedInputPerMillion: 0.05, outputPerMillion: 5.00),
+        "gpt-6.1-terra": PricingRates(inputPerMillion: 0.50, cachedInputPerMillion: 0.025, outputPerMillion: 2.50),
         "gpt-6-luna": PricingRates(inputPerMillion: 0.05, cachedInputPerMillion: 0.005, outputPerMillion: 0.25),
         "gpt-5.6-sol": PricingRates(inputPerMillion: 2.00, cachedInputPerMillion: 0.20, outputPerMillion: 10.00),
         "gpt-5.6-terra": PricingRates(inputPerMillion: 1.00, cachedInputPerMillion: 0.10, outputPerMillion: 6.00),
@@ -451,6 +471,7 @@ enum PricingTable {
         "gpt-6-astra": PricingRates(inputPerMillion: 10.00, cachedInputPerMillion: 1.00, outputPerMillion: 37.50),
         "gpt-6-sol": PricingRates(inputPerMillion: 2.00, cachedInputPerMillion: 0.20, outputPerMillion: 7.50),
         "gpt-6.1-sol": PricingRates(inputPerMillion: 2.00, cachedInputPerMillion: 0.10, outputPerMillion: 7.50),
+        "gpt-6.1-terra": PricingRates(inputPerMillion: 1.00, cachedInputPerMillion: 0.05, outputPerMillion: 3.75),
         "gpt-6-luna": PricingRates(inputPerMillion: 0.10, cachedInputPerMillion: 0.01, outputPerMillion: 0.375),
         "gpt-5.6-sol": PricingRates(inputPerMillion: 4.00, cachedInputPerMillion: 0.40, outputPerMillion: 15.00),
         "gpt-5.6-terra": PricingRates(inputPerMillion: 2.00, cachedInputPerMillion: 0.20, outputPerMillion: 9.00),
@@ -462,12 +483,19 @@ enum PricingTable {
 }
 
 enum CreditPricingTable {
-    static func estimate(for model: String, planType: String, usage: TokenUsage) -> CreditEstimate {
-        guard let rates = rates(for: model, planType: planType) else {
+    // Official Standard credit rates: https://learn.chatgpt.com/docs/pricing (2026-10-27).
+    // These estimate credit-based usage, not included subscription allowance or a live balance.
+    static func estimate(for model: String, planType: String, speed: String = "standard", usage: TokenUsage) -> CreditEstimate {
+        let tier = PricingTable.normalizedSpeed(speed)
+        let canonicalModel = canonical(model, planType: planType)
+        guard tier != "flex",
+              tier != "ultrafast" || ["gpt-6-astra", "gpt-6.1-sol"].contains(canonicalModel),
+              let rates = rates(for: model, planType: planType) else {
             return CreditEstimate(credits: CreditBreakdown(), rateLabel: "unpriced", hasKnownPrice: false)
         }
 
-        let million = 1_000_000.0
+        let multiplier = tier == "ultrafast" ? 6.0 : tier == "fast" ? 2.0 : 1.0
+        let million = 1_000_000.0 / multiplier
         let credits = CreditBreakdown(
             uncachedInput: Double(usage.uncachedInputTokens) / million * rates.rates.inputPerMillion,
             cachedInput: Double(usage.cachedInputTokens) / million * rates.rates.cachedInputPerMillion,
@@ -475,7 +503,7 @@ enum CreditPricingTable {
             reasoningOutput: Double(usage.reasoningOutputTokens) / million * rates.rates.outputPerMillion
         )
 
-        return CreditEstimate(credits: credits, rateLabel: rates.label, hasKnownPrice: true)
+        return CreditEstimate(credits: credits, rateLabel: tier == "standard" ? rates.label : tier, hasKnownPrice: true)
     }
 
     private static func rates(for model: String, planType: String) -> (rates: PricingRates, label: String)? {
@@ -487,12 +515,22 @@ enum CreditPricingTable {
             return (PricingRates(inputPerMillion: 125.00, cachedInputPerMillion: 31.25, outputPerMillion: 250.00), "text")
         case "gpt-6-astra":
             return (PricingRates(inputPerMillion: 250.00, cachedInputPerMillion: 25.00, outputPerMillion: 1250.00), "standard")
+        case "gpt-6.1-sol":
+            return (PricingRates(inputPerMillion: 50.00, cachedInputPerMillion: 2.50, outputPerMillion: 250.00), "standard")
+        case "gpt-6.1-terra":
+            return (PricingRates(inputPerMillion: 25.00, cachedInputPerMillion: 1.25, outputPerMillion: 125.00), "standard")
+        case "daybreak-blue":
+            return (PricingRates(inputPerMillion: 100.00, cachedInputPerMillion: 10.00, outputPerMillion: 500.00), "standard")
+        case "daybreak-red":
+            return (PricingRates(inputPerMillion: 312.50, cachedInputPerMillion: 31.25, outputPerMillion: 1875.00), "standard")
+        case "gpt-rosalind-research":
+            return (PricingRates(inputPerMillion: 125.00, cachedInputPerMillion: 12.50, outputPerMillion: 625.00), "standard")
         case "gpt-6-sol":
             return (PricingRates(inputPerMillion: 50.00, cachedInputPerMillion: 5.00, outputPerMillion: 250.00), "standard")
         case "gpt-6-luna":
             return (PricingRates(inputPerMillion: 2.50, cachedInputPerMillion: 0.25, outputPerMillion: 12.50), "standard")
         case "gpt-5.6-sol":
-            return (PricingRates(inputPerMillion: 125.00, cachedInputPerMillion: 12.50, outputPerMillion: 750.00), "standard")
+            return (PricingRates(inputPerMillion: 100.00, cachedInputPerMillion: 10.00, outputPerMillion: 500.00), "standard")
         case "gpt-5.6-terra":
             return (PricingRates(inputPerMillion: 50.00, cachedInputPerMillion: 5.00, outputPerMillion: 300.00), "standard")
         case "gpt-5.6-luna":
@@ -845,7 +883,10 @@ final class Formatters {
     }
 
     static func credits(_ value: Double) -> String {
-        String(format: "%.0f", value.rounded())
+        if value == 0 { return "0" }
+        if abs(value) < 0.01 { return value > 0 ? "<0.01" : ">-0.01" }
+        return String(format: "%.2f", value)
+            .replacingOccurrences(of: #"\.?0+$"#, with: "", options: .regularExpression)
     }
 
     static func tokens(_ value: Int64) -> String {
@@ -932,13 +973,29 @@ final class DateParsers {
 
 final class CodexUsageStore {
     private let fileManager = FileManager.default
-    private let homeURL = URL(fileURLWithPath: NSHomeDirectory())
+    private let codexURL: URL
+    private let preferRipgrep: Bool
+    private struct CachedSession {
+        let modified: Date?
+        let size: Int?
+        let meta: ThreadMeta?
+        let speed: String
+        let requests: [RequestUsage]
+        let errors: Int
+    }
+    private var sessionCache: [String: CachedSession] = [:]
+
+    init(codexURL: URL? = nil, preferRipgrep: Bool = true) {
+        self.preferRipgrep = preferRipgrep
+        self.codexURL = codexURL ?? URL(fileURLWithPath:
+            ProcessInfo.processInfo.environment["CODEX_HOME"] ?? NSHomeDirectory() + "/.codex")
+    }
     private let dateParsers = DateParsers()
     private let uuidRegex = try! NSRegularExpression(
         pattern: "[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}"
     )
 
-    func loadSnapshot(recentDays: Int = 30, currentMonthAnchor: Date? = nil) -> SpendSnapshot {
+    func loadSnapshot(recentDays: Int = 30, currentMonthAnchor: Date? = nil, includeHistory: Bool = true) -> SpendSnapshot {
         let now = Date()
         let calendar = Calendar.autoupdatingCurrent
         let todayStart = calendar.startOfDay(for: now)
@@ -951,23 +1008,28 @@ final class CodexUsageStore {
         let defaultSpeed = readDefaultSpeed()
         let threadMeta = loadThreadMetadata()
         var parseErrorCount = 0
-        let files = sessionFiles(modifiedSince: nil)
-        var requests = parseWithRipgrep(
-            defaultSpeed: defaultSpeed,
-            threadMeta: threadMeta,
-            parseErrorCount: &parseErrorCount
-        )
-
-        if requests.isEmpty {
-            for file in files {
-                requests.append(contentsOf: parseSessionFile(
-                    file,
-                    windowStart: nil,
-                    defaultSpeed: defaultSpeed,
-                    threadMeta: threadMeta,
-                    parseErrorCount: &parseErrorCount
-                ))
+        let files = sessionFiles(modifiedSince: includeHistory ? nil : currentMonthStart)
+        let livePaths = Set(files.map(\.path))
+        if includeHistory { sessionCache = sessionCache.filter { livePaths.contains($0.key) } }
+        var requests: [RequestUsage] = []
+        for file in files {
+            let values = try? file.resourceValues(forKeys: [.contentModificationDateKey, .fileSizeKey])
+            let meta = extractThreadID(from: file).flatMap { threadMeta[$0] }
+            if let cached = sessionCache[file.path], cached.modified == values?.contentModificationDate,
+               cached.size == values?.fileSize, cached.meta == meta, cached.speed == defaultSpeed {
+                requests.append(contentsOf: cached.requests)
+                parseErrorCount += cached.errors
+                continue
             }
+            var errors = 0
+            let parsed = parseWithRipgrep(files: [file], defaultSpeed: defaultSpeed,
+                                         threadMeta: threadMeta, parseErrorCount: &errors)
+                ?? parseSessionFile(file, defaultSpeed: defaultSpeed,
+                                    threadMeta: threadMeta, parseErrorCount: &errors)
+            sessionCache[file.path] = CachedSession(modified: values?.contentModificationDate,
+                size: values?.fileSize, meta: meta, speed: defaultSpeed, requests: parsed, errors: errors)
+            requests.append(contentsOf: parsed)
+            parseErrorCount += errors
         }
 
         requests.sort { $0.timestamp < $1.timestamp }
@@ -1110,6 +1172,7 @@ final class CodexUsageStore {
 
         return SpendSnapshot(
             generatedAt: now,
+            isHistoryComplete: includeHistory,
             currentMonthStart: currentMonthStart,
             currentMonth: currentMonth,
             currentMonthUnpricedCreditRequests: currentMonthUnpricedCreditRequests,
@@ -1150,8 +1213,8 @@ final class CodexUsageStore {
 
     private func sessionFiles(modifiedSince cutoff: Date?) -> [URL] {
         let roots = [
-            homeURL.appendingPathComponent(".codex/sessions"),
-            homeURL.appendingPathComponent(".codex/archived_sessions")
+            codexURL.appendingPathComponent("sessions"),
+            codexURL.appendingPathComponent("archived_sessions")
         ]
         let keys: Set<URLResourceKey> = [.isRegularFileKey, .contentModificationDateKey]
         var result: [URL] = []
@@ -1222,42 +1285,30 @@ final class CodexUsageStore {
     }
 
     private func parseWithRipgrep(
+        files: [URL],
         defaultSpeed: String,
         threadMeta: [String: ThreadMeta],
         parseErrorCount: inout Int
-    ) -> [RequestUsage] {
-        guard let rgURL = ripgrepURL() else {
-            return []
-        }
-
-        let roots = [
-            homeURL.appendingPathComponent(".codex/sessions"),
-            homeURL.appendingPathComponent(".codex/archived_sessions")
-        ].filter { fileManager.fileExists(atPath: $0.path) }
-
-        guard !roots.isEmpty else {
-            return []
+    ) -> [RequestUsage]? {
+        guard preferRipgrep, let rgURL = ripgrepURL() else {
+            return nil
         }
 
         let process = Process()
         let output = Pipe()
         process.executableURL = rgURL
         process.arguments = [
-            "--json",
-            "-n",
-            "-j",
-            "1",
-            "-g",
-            "*.jsonl",
-            #""type":"turn_context"|"type":"event_msg".*"token_count""#
-        ] + roots.map(\.path)
+            "--with-filename", "--null", "--no-line-number", "--no-heading", "--color", "never", "-j", "1",
+            #""type"\s*:\s*"turn_context"|"type"\s*:\s*"event_msg".*"token_count""#,
+            "--"
+        ] + files.map(\.path)
         process.standardOutput = output
         process.standardError = FileHandle.nullDevice
 
         do {
             try process.run()
         } catch {
-            return []
+            return nil
         }
 
         let data = output.fileHandleForReading.readDataToEndOfFile()
@@ -1265,22 +1316,16 @@ final class CodexUsageStore {
 
         guard process.terminationStatus == 0 || process.terminationStatus == 1,
               let contents = String(data: data, encoding: .utf8) else {
-            return []
+            return nil
         }
 
         var contexts: [String: SessionParseContext] = [:]
         var requests: [RequestUsage] = []
 
-        for rawLine in contents.split(separator: "\n", omittingEmptySubsequences: true) {
-            guard let wrapper = parseJSONLine(rawLine),
-                  wrapper["type"] as? String == "match",
-                  let data = wrapper["data"] as? [String: Any],
-                  let pathObject = data["path"] as? [String: Any],
-                  let path = pathObject["text"] as? String,
-                  let linesObject = data["lines"] as? [String: Any],
-                  let lineText = linesObject["text"] as? String else {
-                continue
-            }
+        for rawLine in contents.components(separatedBy: "\n") where !rawLine.isEmpty {
+            guard let separator = rawLine.firstIndex(of: "\0") else { continue }
+            let path = String(rawLine[..<separator])
+            let lineText = String(rawLine[rawLine.index(after: separator)...])
 
             let fileURL = URL(fileURLWithPath: path)
             guard let context = context(
@@ -1340,10 +1385,12 @@ final class CodexUsageStore {
         context: inout SessionParseContext,
         parseErrorCount: inout Int
     ) -> [RequestUsage] {
-        if line.contains("\"type\":\"turn_context\"") {
-            guard let object = parseJSONLine(line),
-                  object["type"] as? String == "turn_context",
-                  let payload = object["payload"] as? [String: Any] else {
+        guard let object = parseJSONLine(line) else {
+            parseErrorCount += 1
+            return []
+        }
+        if object["type"] as? String == "turn_context" {
+            guard let payload = object["payload"] as? [String: Any] else {
                 parseErrorCount += 1
                 return []
             }
@@ -1359,12 +1406,7 @@ final class CodexUsageStore {
             return finalized
         }
 
-        guard line.contains("\"type\":\"event_msg\""), line.contains("\"token_count\"") else {
-            return []
-        }
-
-        guard let object = parseJSONLine(line),
-              object["type"] as? String == "event_msg",
+        guard object["type"] as? String == "event_msg",
               let timestampString = object["timestamp"] as? String,
               let timestamp = dateParsers.parse(timestampString),
               let payload = object["payload"] as? [String: Any],
@@ -1432,6 +1474,7 @@ final class CodexUsageStore {
         let creditEstimate = CreditPricingTable.estimate(
             for: context.pending?.model ?? context.model,
             planType: planType,
+            speed: context.pending?.speed ?? context.speed,
             usage: usage
         )
 
@@ -1533,7 +1576,6 @@ final class CodexUsageStore {
 
     private func parseSessionFile(
         _ fileURL: URL,
-        windowStart: Date?,
         defaultSpeed: String,
         threadMeta: [String: ThreadMeta],
         parseErrorCount: inout Int
@@ -1543,106 +1585,16 @@ final class CodexUsageStore {
         }
 
         let meta = threadMeta[threadID]
-        var currentModel = meta?.model ?? ""
-        var currentEffort = meta?.effort ?? ""
-        var currentSpeed = defaultSpeed
-        let title = meta?.title ?? threadID
-        let cwd = meta?.cwd ?? ""
-        var context = SessionParseContext(
-            model: currentModel,
-            effort: currentEffort,
-            speed: currentSpeed,
-            title: title,
-            cwd: cwd,
-            threadID: threadID,
-            pending: nil
-        )
-
+        var context = SessionParseContext(model: meta?.model ?? "", effort: meta?.effort ?? "",
+            speed: defaultSpeed, title: meta?.title ?? threadID, cwd: meta?.cwd ?? "", threadID: threadID, pending: nil)
         guard let contents = try? String(contentsOf: fileURL, encoding: .utf8) else {
             parseErrorCount += 1
             return []
         }
-
         var requests: [RequestUsage] = []
-
-        for line in contents.split(separator: "\n", omittingEmptySubsequences: true) {
-            if line.contains("\"type\":\"turn_context\"") {
-                guard let object = parseJSONLine(line),
-                      object["type"] as? String == "turn_context",
-                      let payload = object["payload"] as? [String: Any] else {
-                    if parseJSONLine(line) == nil {
-                        parseErrorCount += 1
-                    }
-                    continue
-                }
-
-                if let request = finalizePendingRequest(&context) {
-                    requests.append(request)
-                }
-
-                updateContext(&context, from: payload)
-                let turnTimestamp = (object["timestamp"] as? String).flatMap { dateParsers.parse($0) } ?? Date()
-                beginPendingRequest(&context, timestamp: turnTimestamp, turnID: nonEmptyString(payload["turn_id"]))
-                currentModel = context.model
-                currentEffort = context.effort
-                currentSpeed = context.speed
-
-                continue
-            }
-
-            guard line.contains("\"type\":\"event_msg\""), line.contains("\"token_count\"") else {
-                continue
-            }
-
-            guard let object = parseJSONLine(line) else {
-                parseErrorCount += 1
-                continue
-            }
-
-            guard object["type"] as? String == "event_msg" else {
-                continue
-            }
-
-            guard let timestampString = object["timestamp"] as? String,
-                  let timestamp = dateParsers.parse(timestampString) else {
-                parseErrorCount += 1
-                continue
-            }
-
-            if let windowStart, timestamp < windowStart {
-                continue
-            }
-
-            guard let payload = object["payload"] as? [String: Any],
-                  let payloadType = payload["type"] as? String,
-                  payloadType == "token_count" else {
-                parseErrorCount += 1
-                continue
-            }
-
-            guard let info = payload["info"] as? [String: Any],
-                  let lastUsage = info["last_token_usage"] as? [String: Any] else {
-                continue
-            }
-
-            let usage = TokenUsage(
-                inputTokens: int64(lastUsage["input_tokens"]),
-                cachedInputTokens: int64(lastUsage["cached_input_tokens"]),
-                outputTokens: int64(lastUsage["output_tokens"]),
-                reasoningOutputTokens: int64(lastUsage["reasoning_output_tokens"]),
-                totalTokens: int64(lastUsage["total_tokens"])
-            )
-
-            let rateLimits = payload["rate_limits"] as? [String: Any]
-            let planType = nonEmptyString(rateLimits?["plan_type"]) ?? ""
-            let modelContextWindow = int64OrNil(info["model_context_window"])
-            addUsage(
-                usage,
-                timestamp: timestamp,
-                planType: planType,
-                modelContextWindow: modelContextWindow,
-                to: &context
-            )
+        for line in contents.components(separatedBy: "\n") where !line.isEmpty {
+            guard line.contains("\"turn_context\"") || line.contains("\"token_count\"") else { continue }
+            requests.append(contentsOf: parseMatchedLine(String(line), context: &context, parseErrorCount: &parseErrorCount))
         }
 
         if let request = finalizePendingRequest(&context) {
@@ -1675,7 +1627,7 @@ final class CodexUsageStore {
     }
 
     private func readDefaultSpeed() -> String {
-        let configURL = homeURL.appendingPathComponent(".codex/config.toml")
+        let configURL = codexURL.appendingPathComponent("config.toml")
         guard let contents = try? String(contentsOf: configURL, encoding: .utf8) else {
             return "standard"
         }
@@ -1712,7 +1664,7 @@ final class CodexUsageStore {
     }
 
     private func loadThreadMetadata() -> [String: ThreadMeta] {
-        let dbURL = homeURL.appendingPathComponent(".codex/state_5.sqlite")
+        let dbURL = codexURL.appendingPathComponent("state_5.sqlite")
         guard fileManager.fileExists(atPath: dbURL.path) else {
             return [:]
         }
@@ -1860,6 +1812,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var preferences = PreferencesStore().load()
     private var preferencesController: PreferencesWindowController?
     private var isRefreshing = false
+    private var hasSnapshot = false
+    private var historyLoaded = false
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
@@ -1874,7 +1828,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         refreshEURRateIfNeeded()
 
         refreshTimer = Timer.scheduledTimer(
-            timeInterval: 5 * 60,
+            timeInterval: 30,
             target: self,
             selector: #selector(refresh),
             userInfo: nil,
@@ -1921,18 +1875,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         isRefreshing = true
+        renderSnapshot()
+        let includeHistory = historyLoaded
         DispatchQueue.global(qos: .utility).async { [weak self] in
             guard let self else {
                 return
             }
 
             let currentMonthAnchor = self.calculationStateStore.loadCurrentMonthAnchor()
-            let snapshot = self.store.loadSnapshot(currentMonthAnchor: currentMonthAnchor)
+            let snapshot = self.store.loadSnapshot(currentMonthAnchor: currentMonthAnchor, includeHistory: includeHistory)
 
             DispatchQueue.main.async {
                 self.currentSnapshot = snapshot
                 self.isRefreshing = false
+                self.hasSnapshot = true
+                self.historyLoaded = true
                 self.renderSnapshot()
+                if !includeHistory { self.refresh() }
             }
         }
     }
@@ -1956,11 +1915,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func statusDisplayText() -> String {
+        guard hasSnapshot else { return "Loading…" }
         switch preferences.spendDisplayMode {
         case .price:
             return Formatters.money(currentSnapshot.today.cost.total, currency: currencyState)
         case .credits:
-            return "\(Formatters.credits(currentSnapshot.currentMonth.credits.total)) cr"
+            return currentSnapshot.currentMonth.creditText(compact: true)
         }
     }
 
@@ -1978,7 +1938,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         case .price:
             return "Today: \(Formatters.money(currentSnapshot.today.cost.total, currency: currencyState))\(estimateSuffix) · \(Formatters.tokens(currentSnapshot.today.usage.totalTokens)) tokens · \(currentSnapshot.today.requests) turns"
         case .credits:
-            return "Current month: \(Formatters.credits(currentSnapshot.currentMonth.credits.total)) credits · Today: \(Formatters.credits(currentSnapshot.today.credits.total)) credits · \(currentSnapshot.today.requests) turns"
+            return "Current month: \(currentSnapshot.currentMonth.creditText()) · Today: \(currentSnapshot.today.creditText()) · \(currentSnapshot.today.requests) turns"
         }
     }
 
@@ -1986,20 +1946,31 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let menu = NSMenu()
         menu.autoenablesItems = false
 
+        guard hasSnapshot else {
+            menu.addItem(staticItem("Loading local usage…"))
+            menu.addItem(NSMenuItem(title: "Quit Codex Spend", action: #selector(quit), keyEquivalent: "q"))
+            return menu
+        }
+        menu.addItem(staticItem("Credit estimates · API-equivalent prices"))
+        menu.addItem(staticItem("Rates checked 27 Oct 2026 · refresh every 30s"))
+        if isRefreshing { menu.addItem(staticItem("Updating usage…")) }
+        if !currentSnapshot.isHistoryComplete { menu.addItem(staticItem("Loading older history; current month is available")) }
         addCurrentMonthSection(to: menu)
         menu.addItem(.separator())
         addTodaySection(to: menu)
         menu.addItem(.separator())
-        addTrendSection(to: menu)
-        menu.addItem(.separator())
-        addAllTimeSubmenu(to: menu)
-        menu.addItem(.separator())
-        addDaysSubmenu(to: menu)
-        addMonthsSubmenu(to: menu)
-        addModelSubmenu(to: menu)
-        addProjectSubmenu(to: menu)
-        addThreadSubmenu(to: menu)
-        addRecentRequestsSubmenu(to: menu)
+        if currentSnapshot.isHistoryComplete {
+            addTrendSection(to: menu)
+            menu.addItem(.separator())
+            addAllTimeSubmenu(to: menu)
+            menu.addItem(.separator())
+            addDaysSubmenu(to: menu)
+            addMonthsSubmenu(to: menu)
+            addModelSubmenu(to: menu)
+            addProjectSubmenu(to: menu)
+            addThreadSubmenu(to: menu)
+            addRecentRequestsSubmenu(to: menu)
+        }
         addCurrencySubmenu(to: menu)
         addLoginItemSubmenu(to: menu)
         menu.addItem(.separator())
@@ -2046,17 +2017,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             "Period: \(Formatters.shortDay.string(from: currentSnapshot.currentMonthStart)) to now"
         ))
         menu.addItem(staticItem(
-            "Spend: \(Formatters.credits(spentCredits)) credits · \(Formatters.money(currentMonth.cost.total, currency: currencyState))\(estimateSuffix)",
+            "Spend: \(currentMonth.creditText()) · \(Formatters.money(currentMonth.cost.total, currency: currencyState))\(estimateSuffix)",
             warning: overBudget
         ))
         menu.addItem(importantItem(
-            overBudget
+            currentMonth.unknownCreditPriceRequests > 0
+                ? "Remaining budget unavailable: credit total is incomplete"
+                : overBudget
                 ? "Over budget by \(Formatters.credits(abs(remainingCredits))) credits"
-                : "Remaining per Month: \(Formatters.credits(remainingCredits)) credits of \(Formatters.credits(monthlyCreditBudgetCredits))",
+                : "Estimated remaining budget: \(Formatters.credits(remainingCredits)) credits of \(Formatters.credits(monthlyCreditBudgetCredits))",
             warning: overBudget
         ))
         menu.addItem(staticItem(
-            "Budget: \(Formatters.credits(monthlyCreditBudgetCredits)) credits"
+            "Local budget: \(Formatters.credits(monthlyCreditBudgetCredits)) credits · not account balance"
         ))
         menu.addItem(staticItem("Turns: \(currentMonth.requests) · Tokens: \(Formatters.tokens(currentMonth.usage.totalTokens))"))
 
@@ -2096,7 +2069,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func spendText(_ aggregate: UsageAggregate, includeEstimateSuffix: Bool = false) -> String {
         let priceText = "\(Formatters.money(aggregate.cost.total, currency: currencyState))\(includeEstimateSuffix ? estimateSuffix : "")"
-        let creditText = "\(Formatters.credits(aggregate.credits.total)) credits"
+        let creditText = aggregate.creditText()
         switch preferences.spendDisplayMode {
         case .price:
             return priceText
@@ -2110,7 +2083,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         case .price:
             return Formatters.money(aggregate.cost.total, currency: currencyState)
         case .credits:
-            return "\(Formatters.credits(aggregate.credits.total)) cr"
+            return aggregate.creditText()
         }
     }
 
@@ -2119,7 +2092,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         case .price:
             return Formatters.money(request.cost.total, currency: currencyState)
         case .credits:
-            return "\(Formatters.credits(request.credits.total)) cr · \(Formatters.money(request.cost.total, currency: currencyState))"
+            let creditText = request.hasKnownCreditPrice ? "\(Formatters.credits(request.credits.total)) cr" : "Unpriced credits"
+            return "\(creditText) · \(Formatters.money(request.cost.total, currency: currencyState))"
         }
     }
 
@@ -2137,6 +2111,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             menu.addItem(staticItem(spike, warning: true))
         }
 
+        if today.unknownCreditPriceRequests > 0 {
+            menu.addItem(staticItem("\(today.unknownCreditPriceRequests) turns have no known credit rate; total is incomplete", warning: true))
+        }
         if preferences.showEstimateLabels && today.unknownPriceRequests > 0 {
             menu.addItem(staticItem("\(today.unknownPriceRequests) requests have no known price"))
         }
@@ -2725,12 +2702,16 @@ final class PreferencesWindowController: NSWindowController {
 }
 
 if CommandLine.arguments.contains("--check-pricing") {
-    // USD per million tokens from the OpenAI pricing page, checked 2026-09-30.
+    // USD per million tokens from the OpenAI pricing page, checked 2026-10-27.
     let cases: [(String, String, Double, Double, Double, Double, Double, Double)] = [
         ("gpt-6.1-sol", "standard", 2, 0.10, 10, 4, 0.20, 15),
         ("gpt-6.1-sol", "fast", 4, 0.20, 20, 8, 0.40, 30),
         ("gpt-6.1-sol", "priority", 4, 0.20, 20, 8, 0.40, 30),
         ("gpt-6.1-sol", "flex", 1, 0.05, 5, 2, 0.10, 7.5),
+        ("gpt-6.1-terra", "standard", 1, 0.05, 5, 2, 0.10, 7.5),
+        ("gpt-6.1-terra", "fast", 2, 0.10, 10, 4, 0.20, 15),
+        ("gpt-6.1-terra", "flex", 0.5, 0.025, 2.5, 1, 0.05, 3.75),
+        ("gpt-6.1-sol", "ultrafast", 12, 0.6, 60, 24, 1.2, 90),
         ("gpt-6-astra", "ultrafast", 60, 6, 300, 120, 12, 450),
         ("gpt-5.6-sol", "standard", 4, 0.40, 20, 8, 0.80, 30),
         ("gpt-5.6-sol", "fast", 8, 0.80, 40, 16, 1.60, 60),
@@ -2754,14 +2735,92 @@ if CommandLine.arguments.contains("--check-pricing") {
             precondition(abs(estimate.cost.reasoningOutput - 0.005 * (long ? longOutput : output)) < 1e-9)
         }
     }
-    let unsupported = PricingTable.estimate(for: "gpt-6.1-sol", speed: "ultrafast", usage: TokenUsage(), modelContextWindow: nil)
+    let unsupported = PricingTable.estimate(for: "gpt-6.1-terra", speed: "ultrafast", usage: TokenUsage(), modelContextWindow: nil)
     precondition(!unsupported.hasKnownPrice && unsupported.cost.total == 0)
-    print("Pricing checks passed")
+    let creditCases: [(String, Double, Double, Double)] = [
+        ("gpt-6.1-sol", 50, 2.5, 250), ("gpt-6.1-terra", 25, 1.25, 125),
+        ("gpt-6-astra", 250, 25, 1250), ("gpt-6-sol", 50, 5, 250),
+        ("gpt-6-luna", 2.5, 0.25, 12.5), ("gpt-5.6-sol", 100, 10, 500),
+        ("gpt-5.6-terra", 50, 5, 300), ("gpt-5.6-luna", 5, 0.5, 30),
+        ("daybreak-blue", 100, 10, 500), ("daybreak-red", 312.5, 31.25, 1875),
+        ("gpt-rosalind-research", 125, 12.5, 625)
+    ]
+    // Input includes cached tokens; reasoning is already included in output.
+    let creditUsage = TokenUsage(inputTokens: 2_000_000, cachedInputTokens: 1_000_000,
+                                 outputTokens: 1_000_000, reasoningOutputTokens: 250_000)
+    for (model, input, cached, output) in creditCases {
+        for (speed, multiplier) in [("standard", 1.0), ("fast", 2.0), ("priority", 2.0)] {
+            let estimate = CreditPricingTable.estimate(for: model, planType: "", speed: speed, usage: creditUsage)
+            precondition(estimate.hasKnownPrice)
+            precondition(abs(estimate.credits.total - (input + cached + output) * multiplier) < 1e-8)
+        }
+    }
+    for model in ["gpt-6.1-sol", "gpt-6-astra"] {
+        let standard = CreditPricingTable.estimate(for: model, planType: "", usage: creditUsage)
+        let ultrafast = CreditPricingTable.estimate(for: model, planType: "", speed: "ultrafast", usage: creditUsage)
+        precondition(ultrafast.hasKnownPrice && abs(ultrafast.credits.total - standard.credits.total * 6) < 1e-8)
+    }
+    for (model, speed) in [("unknown", "standard"), ("gpt-6.1-terra", "ultrafast"), ("gpt-6.1-sol", "flex")] {
+        let estimate = CreditPricingTable.estimate(for: model, planType: "", speed: speed, usage: creditUsage)
+        precondition(!estimate.hasKnownPrice && estimate.credits.total == 0)
+    }
+    precondition(Formatters.credits(0.25) == "0.25")
+    precondition(Formatters.credits(0.001) == "<0.01")
+    precondition(Formatters.credits(7000) == "7000")
+    precondition(Formatters.credits(0) == "0")
+    print("API and credit pricing checks passed")
     exit(EXIT_SUCCESS)
 }
 
+if CommandLine.arguments.contains("--check-usage") {
+    do {
+        let fm = FileManager.default
+        let root = fm.temporaryDirectory.appendingPathComponent("codex-spend-check-" + UUID().uuidString)
+        try fm.createDirectory(at: root.appendingPathComponent("sessions"), withIntermediateDirectories: true)
+        try fm.createDirectory(at: root.appendingPathComponent("archived_sessions"), withIntermediateDirectories: true)
+        defer { try? fm.removeItem(at: root) }
+        let file = root.appendingPathComponent("sessions/rollout-00000000-0000-0000-0000-000000000001.jsonl")
+        let now = ISO8601DateFormatter().string(from: Date())
+        func context(_ model: String = "gpt-6.1-sol", speed: String = "standard") -> String {
+            "{\"type\": \"turn_context\", \"timestamp\": \"\(now)\", \"payload\": {\"model\": \"\(model)\", \"service_tier\": \"\(speed)\"}}\n"
+        }
+        let event = "{\"type\": \"event_msg\", \"timestamp\": \"\(now)\", \"payload\": {\"type\": \"token_count\", \"info\": {\"last_token_usage\": {\"input_tokens\": 2000000, \"cached_input_tokens\": 1000000, \"output_tokens\": 1000000, \"reasoning_output_tokens\": 250000, \"total_tokens\": 3000000}}}}\n"
+        for preferRipgrep in [true, false] {
+            let store = CodexUsageStore(codexURL: root, preferRipgrep: preferRipgrep)
+            try (context() + event).write(to: file, atomically: true, encoding: .utf8)
+            let first = store.loadSnapshot(includeHistory: false)
+            precondition(first.today.requests == 1 && first.today.credits.total == 302.5)
+            precondition(!first.isHistoryComplete && first.currentMonth.credits.total == 302.5)
+            let unchanged = store.loadSnapshot()
+            precondition(unchanged.isHistoryComplete && unchanged.today.credits.total == 302.5)
+            // A growing active turn must replace its cached result, not double count it.
+            try (context() + event + event).write(to: file, atomically: true, encoding: .utf8)
+            let changed = store.loadSnapshot()
+            precondition(changed.today.requests == 1 && changed.today.credits.total == 605)
+            try (context(speed: "fast") + event + context("gpt-6.1-terra") + event)
+                .write(to: file, atomically: true, encoding: .utf8)
+            let switched = store.loadSnapshot()
+            precondition(switched.today.requests == 2 && switched.today.credits.total == 756.25)
+            // Moving to the archive must neither lose nor duplicate usage.
+            let archived = root.appendingPathComponent("archived_sessions/" + file.lastPathComponent)
+            try fm.moveItem(at: file, to: archived)
+            precondition(store.loadSnapshot().today.credits.total == 756.25)
+            try fm.removeItem(at: archived)
+            precondition(store.loadSnapshot().today.requests == 0)
+            try (context("future-model") + event).write(to: file, atomically: true, encoding: .utf8)
+            let unknown = store.loadSnapshot().today
+            precondition(unknown.unknownCreditPriceRequests == 1 && unknown.creditText() == "Credits unavailable")
+        }
+        print("Usage, refresh, archive, fallback, and unpriced checks passed")
+        exit(EXIT_SUCCESS)
+    } catch {
+        fputs("Usage checks failed: \(error)\n", stderr)
+        exit(EXIT_FAILURE)
+    }
+}
+
 if CommandLine.arguments.contains("--print-summary") {
-    print(CodexUsageStore().loadSnapshot().plainTextSummary(currency: CurrencyStore().load()))
+    print(CodexUsageStore().loadSnapshot(includeHistory: !CommandLine.arguments.contains("--current-month")).plainTextSummary(currency: CurrencyStore().load()))
     exit(EXIT_SUCCESS)
 }
 
