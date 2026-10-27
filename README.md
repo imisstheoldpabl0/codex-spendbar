@@ -52,11 +52,11 @@ prices each event with the model, speed, and context information available for
 that event, then rolls the priced events up into one visible prompt turn.
 
 Rates are hardcoded in `Sources/CodexSpend/main.swift` under `PricingTable`.
-Those rates come from the OpenAI API pricing page (checked September 30, 2026). Standard, flex, fast, ultrafast, and
+Those rates come from the OpenAI API pricing page (checked October 27, 2026). Standard, flex, fast, ultrafast, and
 long-context rates are represented separately when OpenAI publishes different
 prices for those tiers.
 
-The table includes GPT-6 Astra, Sol, and Luna pricing, GPT-6.1 Sol pricing, GPT-5.6 Sol, Terra, and
+The table includes GPT-6 Astra, Sol, and Luna pricing, GPT-6.1 Sol and Terra pricing, GPT-5.6 Sol, Terra, and
 Luna pricing, GPT-5.5 and GPT-5.4 Pro variants, and the existing Codex model
 entries so historical local sessions continue to receive the rates that match
 their recorded model names.
@@ -64,8 +64,21 @@ The `gpt-5.6` alias is priced as `gpt-5.6-sol`.
 GPT-5.6 Sol uses the current promotional rates, advertised through at least
 November 21, 2026. Rates apply to all matching local sessions, including historical
 sessions; the app does not select rates by event date.
-Codex plan credit rates are separate from API dollar rates. GPT-6.1 Sol credit
-estimates remain unpriced until a credit rate is added from a plan pricing source.
+Codex credit estimates use the [official credit rate card](https://learn.chatgpt.com/docs/pricing),
+checked October 27, 2026. GPT-6.1 Sol is priced at 50 / 2.5 / 250 credits per million
+uncached input / cached input / output tokens; GPT-6.1 Terra uses 25 / 1.25 / 125.
+GPT-5.6 Sol now uses 100 / 10 / 500. The table also includes the current Daybreak
+and Rosalind credit entries. Fast (including the legacy `priority` alias) uses 2x
+Standard credit rates; supported Ultrafast models use 6x. Flex credits and unsupported
+model/tier combinations remain unpriced. No API long-context multiplier is inferred
+for credit estimates from the Standard credit rate card.
+
+Credits are estimates of local token usage at credit-based rates, not a live OpenAI
+credit balance or a measurement of subscription allowance. Included subscription
+usage has different speed multipliers. The monthly budget is a local preference.
+Unpriced requests are marked explicitly and make the total incomplete; they are
+never presented as a known zero-credit spend. Current rates apply to historical
+sessions as well; effective-date rate cards are not available in the app.
 
 Reasoning effort is not a separate price multiplier in this app. OpenAI bills
 reasoning tokens as output tokens, so higher reasoning effort affects cost by
@@ -76,7 +89,7 @@ Fast mode is estimated with OpenAI Fast mode rates when Codex metadata
 or local config exposes a `fast` or `priority` service tier. Flex mode is
 estimated with flex rates when exposed. Otherwise, the app falls back to standard
 rates for the detected model.
-Ultrafast mode uses the published GPT-6 Astra rates when exposed in metadata or
+Ultrafast mode uses the published GPT-6 Astra and GPT-6.1 Sol rates when exposed in metadata or
 config. Other models with an ultrafast tier are marked unpriced.
 
 For GPT-6, GPT-6.1, GPT-5.6, GPT-5.5, and GPT-5.4 family models, long-context pricing is
@@ -84,12 +97,21 @@ used when the recorded input token count is above 272K. Unknown models or tiers
 are counted for tokens, but their price is marked as unpriced and contributes
 `$0.00` to the estimate.
 
+API estimates do not add regional-processing premiums or separate cache-write charges,
+which the consumed local token fields do not identify.
+
 EUR display is calculated after the USD estimate by multiplying by the cached
 USD-to-EUR reference rate.
 
 Current menu features:
 
 - Today and all-time spend summaries.
+- Current-month usage loads before older history; loading is shown explicitly.
+- Automatic refresh every 30 seconds, reusing unchanged session results in memory.
+  The initial history scan can take longer.
+- Fractional credit display so small increases remain visible.
+- Both compact and whitespace-formatted JSONL records are supported.
+- Unknown credit rates show unavailable/incomplete totals and suppress remaining-budget estimates.
 - Warning coloring for daily spend and expensive prompt turns.
 - Recent spike detection against active recent days.
 - Trend charts with selectable block, line, or ASCII rendering.
@@ -100,6 +122,7 @@ Current menu features:
 
 Pricing and FX references:
 
+- OpenAI credit rates and speed multipliers: https://learn.chatgpt.com/docs/pricing
 - OpenAI API pricing: https://developers.openai.com/api/docs/pricing
 - OpenAI Fast mode: https://developers.openai.com/api/docs/guides/fast-mode
 - OpenAI reasoning guide: https://developers.openai.com/api/docs/guides/reasoning
@@ -176,11 +199,12 @@ Uninstall the app and login item:
 
 ## Debug
 
-Build and check pricing, including the 272K context boundary:
+Build and check API/credit pricing, including the 272K API context boundary, and session refresh behavior:
 
 ```sh
 ./scripts/build.sh
 "dist/Codex Spend.app/Contents/MacOS/Codex Spend" --check-pricing
+"dist/Codex Spend.app/Contents/MacOS/Codex Spend" --check-usage
 ```
 
 Print the same summary used by the menu bar:
@@ -188,3 +212,12 @@ Print the same summary used by the menu bar:
 ```sh
 "dist/Codex Spend.app/Contents/MacOS/Codex Spend" --print-summary
 ```
+
+For a faster summary that scans files modified since the first of the current month:
+
+```sh
+"dist/Codex Spend.app/Contents/MacOS/Codex Spend" --print-summary --current-month
+```
+
+Set `CODEX_HOME` to read a different local Codex data directory. Session parsing
+checks use isolated temporary fixtures and exercise both ripgrep and fallback readers.
