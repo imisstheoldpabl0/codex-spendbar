@@ -304,10 +304,12 @@ enum PricingTable {
         let longContext = isLikelyLongContext(model: canonicalModel, usage: usage, modelContextWindow: modelContextWindow)
 
         if tier == "ultrafast" {
-            guard canonicalModel == "gpt-6-astra" else { return nil }
-            return longContext
-                ? (PricingRates(inputPerMillion: 120, cachedInputPerMillion: 12, outputPerMillion: 450), "ultrafast long-context")
-                : (PricingRates(inputPerMillion: 60, cachedInputPerMillion: 6, outputPerMillion: 300), "ultrafast")
+            guard canonicalModel == "gpt-6-astra" || canonicalModel == "gpt-6.1-sol",
+                  let base = (longContext ? longContextRates : standardRates)[canonicalModel] else { return nil }
+            return (PricingRates(inputPerMillion: base.inputPerMillion * 6,
+                                 cachedInputPerMillion: base.cachedInputPerMillion * 6,
+                                 outputPerMillion: base.outputPerMillion * 6),
+                    longContext ? "ultrafast long-context" : "ultrafast")
         }
 
         if tier == "fast", longContext, let rates = fastLongContextRates[canonicalModel] {
@@ -374,6 +376,7 @@ enum PricingTable {
         "gpt-6-astra": PricingRates(inputPerMillion: 10.00, cachedInputPerMillion: 1.00, outputPerMillion: 50.00),
         "gpt-6-sol": PricingRates(inputPerMillion: 2.00, cachedInputPerMillion: 0.20, outputPerMillion: 10.00),
         "gpt-6.1-sol": PricingRates(inputPerMillion: 2.00, cachedInputPerMillion: 0.10, outputPerMillion: 10.00),
+        "gpt-6.1-terra": PricingRates(inputPerMillion: 1.00, cachedInputPerMillion: 0.05, outputPerMillion: 5.00),
         "gpt-6-luna": PricingRates(inputPerMillion: 0.10, cachedInputPerMillion: 0.01, outputPerMillion: 0.50),
         "gpt-5.6-sol": PricingRates(inputPerMillion: 4.00, cachedInputPerMillion: 0.40, outputPerMillion: 20.00),
         "gpt-5.6-terra": PricingRates(inputPerMillion: 2.00, cachedInputPerMillion: 0.20, outputPerMillion: 12.00),
@@ -397,6 +400,7 @@ enum PricingTable {
         "gpt-6-astra": PricingRates(inputPerMillion: 20.00, cachedInputPerMillion: 2.00, outputPerMillion: 75.00),
         "gpt-6-sol": PricingRates(inputPerMillion: 4.00, cachedInputPerMillion: 0.40, outputPerMillion: 15.00),
         "gpt-6.1-sol": PricingRates(inputPerMillion: 4.00, cachedInputPerMillion: 0.20, outputPerMillion: 15.00),
+        "gpt-6.1-terra": PricingRates(inputPerMillion: 2.00, cachedInputPerMillion: 0.10, outputPerMillion: 7.50),
         "gpt-6-luna": PricingRates(inputPerMillion: 0.20, cachedInputPerMillion: 0.02, outputPerMillion: 0.75),
         "gpt-5.6-sol": PricingRates(inputPerMillion: 8.00, cachedInputPerMillion: 0.80, outputPerMillion: 30.00),
         "gpt-5.6-terra": PricingRates(inputPerMillion: 4.00, cachedInputPerMillion: 0.40, outputPerMillion: 18.00),
@@ -411,6 +415,7 @@ enum PricingTable {
         "gpt-6-astra": PricingRates(inputPerMillion: 20.00, cachedInputPerMillion: 2.00, outputPerMillion: 100.00),
         "gpt-6-sol": PricingRates(inputPerMillion: 4.00, cachedInputPerMillion: 0.40, outputPerMillion: 20.00),
         "gpt-6.1-sol": PricingRates(inputPerMillion: 4.00, cachedInputPerMillion: 0.20, outputPerMillion: 20.00),
+        "gpt-6.1-terra": PricingRates(inputPerMillion: 2.00, cachedInputPerMillion: 0.10, outputPerMillion: 10.00),
         "gpt-6-luna": PricingRates(inputPerMillion: 0.20, cachedInputPerMillion: 0.02, outputPerMillion: 1.00),
         "gpt-5.6-sol": PricingRates(inputPerMillion: 8.00, cachedInputPerMillion: 0.80, outputPerMillion: 40.00),
         "gpt-5.6-terra": PricingRates(inputPerMillion: 4.00, cachedInputPerMillion: 0.40, outputPerMillion: 24.00),
@@ -428,6 +433,7 @@ enum PricingTable {
         "gpt-6-astra": PricingRates(inputPerMillion: 40.00, cachedInputPerMillion: 4.00, outputPerMillion: 150.00),
         "gpt-6-sol": PricingRates(inputPerMillion: 8.00, cachedInputPerMillion: 0.80, outputPerMillion: 30.00),
         "gpt-6.1-sol": PricingRates(inputPerMillion: 8.00, cachedInputPerMillion: 0.40, outputPerMillion: 30.00),
+        "gpt-6.1-terra": PricingRates(inputPerMillion: 4.00, cachedInputPerMillion: 0.20, outputPerMillion: 15.00),
         "gpt-6-luna": PricingRates(inputPerMillion: 0.40, cachedInputPerMillion: 0.04, outputPerMillion: 1.50)
     ]
 
@@ -435,6 +441,7 @@ enum PricingTable {
         "gpt-6-astra": PricingRates(inputPerMillion: 5.00, cachedInputPerMillion: 0.50, outputPerMillion: 25.00),
         "gpt-6-sol": PricingRates(inputPerMillion: 1.00, cachedInputPerMillion: 0.10, outputPerMillion: 5.00),
         "gpt-6.1-sol": PricingRates(inputPerMillion: 1.00, cachedInputPerMillion: 0.05, outputPerMillion: 5.00),
+        "gpt-6.1-terra": PricingRates(inputPerMillion: 0.50, cachedInputPerMillion: 0.025, outputPerMillion: 2.50),
         "gpt-6-luna": PricingRates(inputPerMillion: 0.05, cachedInputPerMillion: 0.005, outputPerMillion: 0.25),
         "gpt-5.6-sol": PricingRates(inputPerMillion: 2.00, cachedInputPerMillion: 0.20, outputPerMillion: 10.00),
         "gpt-5.6-terra": PricingRates(inputPerMillion: 1.00, cachedInputPerMillion: 0.10, outputPerMillion: 6.00),
@@ -451,6 +458,7 @@ enum PricingTable {
         "gpt-6-astra": PricingRates(inputPerMillion: 10.00, cachedInputPerMillion: 1.00, outputPerMillion: 37.50),
         "gpt-6-sol": PricingRates(inputPerMillion: 2.00, cachedInputPerMillion: 0.20, outputPerMillion: 7.50),
         "gpt-6.1-sol": PricingRates(inputPerMillion: 2.00, cachedInputPerMillion: 0.10, outputPerMillion: 7.50),
+        "gpt-6.1-terra": PricingRates(inputPerMillion: 1.00, cachedInputPerMillion: 0.05, outputPerMillion: 3.75),
         "gpt-6-luna": PricingRates(inputPerMillion: 0.10, cachedInputPerMillion: 0.01, outputPerMillion: 0.375),
         "gpt-5.6-sol": PricingRates(inputPerMillion: 4.00, cachedInputPerMillion: 0.40, outputPerMillion: 15.00),
         "gpt-5.6-terra": PricingRates(inputPerMillion: 2.00, cachedInputPerMillion: 0.20, outputPerMillion: 9.00),
@@ -2725,12 +2733,16 @@ final class PreferencesWindowController: NSWindowController {
 }
 
 if CommandLine.arguments.contains("--check-pricing") {
-    // USD per million tokens from the OpenAI pricing page, checked 2026-09-30.
+    // USD per million tokens from the OpenAI pricing page, checked 2026-10-27.
     let cases: [(String, String, Double, Double, Double, Double, Double, Double)] = [
         ("gpt-6.1-sol", "standard", 2, 0.10, 10, 4, 0.20, 15),
         ("gpt-6.1-sol", "fast", 4, 0.20, 20, 8, 0.40, 30),
         ("gpt-6.1-sol", "priority", 4, 0.20, 20, 8, 0.40, 30),
         ("gpt-6.1-sol", "flex", 1, 0.05, 5, 2, 0.10, 7.5),
+        ("gpt-6.1-sol", "ultrafast", 12, 0.60, 60, 24, 1.20, 90),
+        ("gpt-6.1-terra", "standard", 1, 0.05, 5, 2, 0.10, 7.5),
+        ("gpt-6.1-terra", "fast", 2, 0.10, 10, 4, 0.20, 15),
+        ("gpt-6.1-terra", "flex", 0.5, 0.025, 2.5, 1, 0.05, 3.75),
         ("gpt-6-astra", "ultrafast", 60, 6, 300, 120, 12, 450),
         ("gpt-5.6-sol", "standard", 4, 0.40, 20, 8, 0.80, 30),
         ("gpt-5.6-sol", "fast", 8, 0.80, 40, 16, 1.60, 60),
@@ -2754,7 +2766,7 @@ if CommandLine.arguments.contains("--check-pricing") {
             precondition(abs(estimate.cost.reasoningOutput - 0.005 * (long ? longOutput : output)) < 1e-9)
         }
     }
-    let unsupported = PricingTable.estimate(for: "gpt-6.1-sol", speed: "ultrafast", usage: TokenUsage(), modelContextWindow: nil)
+    let unsupported = PricingTable.estimate(for: "gpt-6.1-terra", speed: "ultrafast", usage: TokenUsage(), modelContextWindow: nil)
     precondition(!unsupported.hasKnownPrice && unsupported.cost.total == 0)
     print("Pricing checks passed")
     exit(EXIT_SUCCESS)

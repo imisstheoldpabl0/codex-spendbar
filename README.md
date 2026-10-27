@@ -52,14 +52,14 @@ prices each event with the model, speed, and context information available for
 that event, then rolls the priced events up into one visible prompt turn.
 
 Rates are hardcoded in `Sources/CodexSpend/main.swift` under `PricingTable`.
-Those rates come from the OpenAI API pricing page (checked September 30, 2026). Standard, flex, fast, ultrafast, and
-long-context rates are represented separately when OpenAI publishes different
-prices for those tiers.
+Those rates come from the OpenAI API pricing page (checked October 27, 2026).
+Standard, flex, fast, ultrafast, and long-context rates are represented
+separately when OpenAI publishes different prices for those tiers.
 
-The table includes GPT-6 Astra, Sol, and Luna pricing, GPT-6.1 Sol pricing, GPT-5.6 Sol, Terra, and
-Luna pricing, GPT-5.5 and GPT-5.4 Pro variants, and the existing Codex model
-entries so historical local sessions continue to receive the rates that match
-their recorded model names.
+The table includes GPT-6 Astra, Sol, and Luna pricing, GPT-6.1 Sol and Terra,
+GPT-5.6 Sol, Terra, and Luna, GPT-5.5 and GPT-5.4 Pro variants, and existing
+Codex model entries so historical local sessions continue to receive the rates
+that match their recorded model names.
 The `gpt-5.6` alias is priced as `gpt-5.6-sol`.
 GPT-5.6 Sol uses the current promotional rates, advertised through at least
 November 21, 2026. Rates apply to all matching local sessions, including historical
@@ -76,8 +76,8 @@ Fast mode is estimated with OpenAI Fast mode rates when Codex metadata
 or local config exposes a `fast` or `priority` service tier. Flex mode is
 estimated with flex rates when exposed. Otherwise, the app falls back to standard
 rates for the detected model.
-Ultrafast mode uses the published GPT-6 Astra rates when exposed in metadata or
-config. Other models with an ultrafast tier are marked unpriced.
+Ultrafast mode uses published GPT-6 Astra and GPT-6.1 Sol rates when exposed in
+metadata or config. Other models with an ultrafast tier are marked unpriced.
 
 For GPT-6, GPT-6.1, GPT-5.6, GPT-5.5, and GPT-5.4 family models, long-context pricing is
 used when the recorded input token count is above 272K. Unknown models or tiers
